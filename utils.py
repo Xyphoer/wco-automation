@@ -17,7 +17,7 @@ class Utils:
         def check_checkouts(self, sorted_allocs) -> list:
             patron_duplicates = []
             checkouts = []
-            patron_oid = 0
+            patron_oid = -1
 
             for alloc in sorted_allocs:
                 
@@ -42,7 +42,7 @@ class Utils:
             
             return patron_duplicates
         
-        def patrons_with_duplicate_checkouts(self, sorted_allocs, connection: Connection):
+        def patrons_with_duplicate_checkouts(self, sorted_allocs, connection: Connection) -> list:
             patron_oids = self.check_checkouts(sorted_allocs)
             patrons = []
 

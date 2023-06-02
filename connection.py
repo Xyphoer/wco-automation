@@ -39,22 +39,7 @@ class Connection:
                                         "orderBy": "patronId"})
             
             sorted_allocs += list(allocs.json()['payload']['result'])
-
-        # allocs_ltg =  requests.post(url = self.host + "/rest/allocation/search",
-        #                         headers = {"Authorization": "Bearer " + self.session_token},
-        #                         json = {"properties": ["patron", "activeTypes"], 
-        #                                 "query": {"and": {"state": "CHECKOUT", "center": self.college}},
-        #                                 #"limit": limit,
-        #                                 "orderBy": "patronId"})
-        
-        # allocs_decom =  requests.post(url = self.host + "/rest/allocation/search",
-        #                         headers = {"Authorization": "Bearer " + self.session_token},
-        #                         json = {"properties": ["patron", "activeTypes"], 
-        #                                 "query": {"and": {"state": "CHECKOUT", "center": self.memorial}},
-        #                                 #"limit": limit,
-        #                                 "orderBy": "patronId"})
-        
-        # sorted_allocs = list(allocs_ltg.json()['payload']['result']) + list(allocs_decom.json()['payload']['result'])
+            
         sorted_allocs.sort(key = lambda person: person['patron']['oid'])
 
         return sorted_allocs
