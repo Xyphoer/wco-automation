@@ -7,7 +7,8 @@ password = input("password: ")
 
 connection = Connection(userid, password, host)
 
-print(connection.startSession())
+a = connection.startSession()
+print(a)
 
 try:
         print(connection.setScope())

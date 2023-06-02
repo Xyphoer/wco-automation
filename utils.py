@@ -7,7 +7,7 @@ class Utils:
         def check_dupe_types(self, alloc_types, allocs) -> bool:
             for alloc_type in alloc_types:
                 for alloc in allocs:
-                    if 'laptop' in alloc_type['name'].lower():
+                    if 'laptop' in alloc_type['name'].lower() or 'ipad' in alloc_type['name'].lower():
                         if alloc_type in alloc['activeTypes']:
                             return True
                         if alloc_type['parent'] in [type_parent['parent'] for type_parent in alloc['activeTypes']]:

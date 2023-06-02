@@ -13,7 +13,8 @@ class Connection:
         self.social = self.current_session.json()['payload']['roles']['operator'][7]
         self.steenbock = self.current_session.json()['payload']['roles']['operator'][8]
         self.memorial = self.current_session.json()['payload']['roles']['operator'][6]
-        self.centers = [self.college, self.business, self.ebling, self.social, self.steenbock, self.memorial]
+        self.merit = self.current_session.json()['payload']['roles']['operator'][5]
+        self.centers = [self.college, self.business, self.ebling, self.social, self.steenbock, self.memorial, self.merit]
         self.scope = self.setScope()
 
     def startSession(self):
