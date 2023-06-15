@@ -92,6 +92,19 @@ class Connection:
                              json = {"oid": patron_oid})
     
     #####
+    # Name: get_open_invoices
+    # Inputs: None
+    # Output: Invoice information
+    # Description: Get invoice information and the corresponding patrons
+    #####
+    def get_open_invoices(self):
+        return requests.post(url = self.host + "/rest/invoice/search",
+                             headers = {"Authorization": "Bearer " + self.session_token},
+                             json = {"query": {"invoiceStatus": "PENDING"},
+                                     "properties": ["invoiceBalance",
+                                                    "patron"]})
+    
+    #####
     # Name: close
     # Inputs: none
     # Output: Logout information

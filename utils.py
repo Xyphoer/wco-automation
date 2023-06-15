@@ -91,3 +91,35 @@ class dupeCheckouts:
             patrons.append(connection.get_patron(oid))
         
         return patrons
+
+#####
+# Name: Fines
+# Inputs: connection (Connection)
+# Description: Manage Patrons Fines
+#####
+class Fines:
+
+    def __init__(self, connection: Connection):
+        self.connection = connection
+
+    #####
+    # Name: search_open
+    # Inputs: None
+    # Output: formatted_string (list)
+    # Description: Get open invoice information and associated patrons
+    #####
+    def search_open(self):
+
+        # request invoice information
+        invoices = self.connection.get_open_invoices().json()
+        formatted_string = ""       # hold final output string
+
+        # run for each invoice
+        for invoice in invoices['payload']['result']:
+            # format result with patront and invoice information
+            formatted_string += f"Patron: {invoice['patron']['name']} ({invoice['patron']['barcode']})\n" \
+                                f"Invoice: {invoice['name']}\n" \
+                                f"Outstanding Balance: {invoice['invoiceBalance']}\n" \
+                                f"Link: https://uwmadison.webcheckout.net/sso/wco?method=invoice&invoice={invoice['oid']}\n\n"
+            
+        return formatted_string
