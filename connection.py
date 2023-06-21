@@ -80,6 +80,31 @@ class Connection:
 
         return sorted_allocs
     
+    def get_checkouts_for_overdue(self):
+        sorted_allocs = {}
+
+        for center in self.centers:
+            allocs = requests.post(url = self.host + "/rest/allocation/search",
+                                headers = {"Authorization": "Bearer " + self.session_token},
+                                json = {"properties": ["uniqueId", "patron", "realStartTime", "scheduledEndTime", "itemNames"], 
+                                        "query": {"and": {"state": "CHECKOUT", "center": center}},
+                                        "orderBy": "patronId"})
+            
+            sorted_allocs[center['name']] = list(allocs.json()['payload']['result'])
+
+        return sorted_allocs
+    
+    #####
+    # Name: get_checkout
+    # Inputs: id (str)
+    # Output: checkout information
+    # Description: Gets a specific checkout by it's unique CK-#### id
+    #####
+    def get_checkout(self, id: str):
+        return requests.post(url = self.host + "/rest/allocation/search",
+                             headers = {"Authorization": "Bearer " + self.session_token},
+                             json = {"query": {"uniqueId": id}})
+    
     #####
     # Name: get_patron
     # Inputs: patron_oid (string)
@@ -102,7 +127,36 @@ class Connection:
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"query": {"invoiceStatus": "PENDING"},
                                      "properties": ["invoiceBalance",
-                                                    "patron"]})
+                                                    "person"]})
+    
+    #####
+    # Name: create_invoice
+    # Inputs: account, organization, center
+    # Output: Invoice information
+    # Description: Create an invoice for said account, under said organization (should always be LTG),
+    #              in said checkout center.
+    #####
+    def create_invoice(self, account, organization, center):
+        return requests.post(url = self.host + "/rest/invoice/new",
+                             headers = {"Authorization": "Bearer " + self.session_token},
+                             json = {"account": account,
+                                     "organization": organization,
+                                     "checkoutCenter": center})
+    
+    #####
+    # Name: add_charge
+    # Inputs: invoice, amount (str), subtype (str)
+    # Output: Invoice information
+    # Description: Add a charge to an invoice. Requires amount, desired invoice, and subtype.
+    #              Subtype must be one of "Abuse Fine", "Late Fine", "Loss", "Damage", "Usage Fee", "Supplies",
+    #              "Overtime", "Labor", "Shipping", or "Other."
+    #####
+    def add_charge(self, invoice, amount: str, subtype: str):
+        return requests.post(url = self.host + "/rest/invoice/addCharge",
+                            headers = {"Authorization": "Bearer " + self.session_token},
+                            json = {"amount": amount,
+                                    "invoice": invoice,
+                                    "subtype": subtype})
     
     #####
     # Name: close

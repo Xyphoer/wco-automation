@@ -1,5 +1,12 @@
 from connection import Connection
 
+# For Dos class
+import csv
+import re
+import webbrowser
+import pathlib
+from datetime import datetime, timezone
+
 #####
 # Name: dupeCheckouts
 # Inputs: None
@@ -117,9 +124,88 @@ class Fines:
         # run for each invoice
         for invoice in invoices['payload']['result']:
             # format result with patront and invoice information
-            formatted_string += f"Patron: {invoice['patron']['name']} ({invoice['patron']['barcode']})\n" \
+            formatted_string += f"Patron: {invoice['person']['name'] if invoice['person']['name'] else 'No name found.'} "\
+                                f"({invoice['person']['barcode'] if invoice['person']['barcode'] else 'No barcode found.'})\n" \
                                 f"Invoice: {invoice['name']}\n" \
                                 f"Outstanding Balance: {invoice['invoiceBalance']}\n" \
                                 f"Link: https://uwmadison.webcheckout.net/sso/wco?method=invoice&invoice={invoice['oid']}\n\n"
             
         return formatted_string
+
+class Dos:
+
+    def __init__(self, connection: Connection):
+        self.connection = connection
+
+    def dos(self):
+        allocations = []
+
+        issue_file = ""
+
+        for file in pathlib.Path('.').glob('*.csv'):
+            if 'issues' in file.name.lower() and file.stat().st_ctime > (issue_file.stat().st_ctime if type(issue_file) != str else 0):
+                issue_file = file
+
+        if issue_file == "":
+            print("Could not find issues file.")
+
+        if issue_file != "":
+            with open(issue_file, newline='') as file:
+                reader = csv.reader(file)
+
+                for row in reader:
+                    if row[1] == 'Stalled' and 'Overdue' in row[4]:
+                        match = re.search('(CK- *\d+)+', row[7])
+                        if (match):
+                            for group in match.groups():
+                                allocations.append((row[0], group.replace(" ", "")))
+
+            allocations.sort(key=lambda allocation: int(allocation[1][3:]))
+
+            for allocation in allocations:
+                
+                if self.connection.get_checkout(allocation[1]).json()['payload']['result'][0]['state'] == 'CHECKOUT':
+                    allocations.remove(allocation)
+                else:
+                    print(allocation[1])
+            
+            if len(allocations):
+                in_browser = input("Open redmine tickets? (y/n): ")
+                if in_browser.lower()[0] == 'y':
+                    for allocation in allocations:
+                        webbrowser.open(f"https://redmine.library.wisc.edu/issues/{allocation[0]}")
+            else:
+                input("No open DoS tickets have been returned. Press enter to exit. ")
+        else:
+            input("No allocation or issue files found. Press enter to exit. ")
+    
+    def get_overdues(self):
+        tz = datetime.now() - datetime.utcnow()
+        #time_now = datetime.now(tz=timezone(tz))
+        time_now = datetime(2023, 1, 1, tzinfo=timezone(tz))
+        overdue_amount = 0
+
+        overdues = self.connection.get_checkouts_for_overdue()
+
+        for location in overdues:
+            print(">>>>>" + location)
+            for checkout in overdues[location]:
+                timestamp = checkout['scheduledEndTime']
+                timestamp_formatted = datetime.strptime(timestamp, '%Y-%m-%dT%H:%M:%S.%f%z')
+                start_time = datetime.strptime(checkout['realStartTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+                start_time = start_time.strftime("%m/%d/%Y - %I:%M:%S %p  tz: %z")
+
+                if timestamp_formatted < time_now:
+                    overdue_amount += 1
+                    print(f"Checkout: {checkout['name']}\n" \
+                          f"Patron: {checkout['patron']['name']}\n" \
+                          f"Item(s): {', '.join(checkout['itemNames'])}\n" \
+                          f"Start Time: {start_time}\n" \
+                          f"WCO link: https://uwmadison.webcheckout.net/sso/wco?method=show-entity&type=allocation&oid={checkout['oid']}\n\n")
+        
+        print(f"Total overdue: {overdue_amount}")
+
+
+
+    def get_dos(self):
+        pass

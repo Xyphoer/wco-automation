@@ -2,5 +2,7 @@
 
 ## Current capabilities:
 - Checking for duplicate resource type checkouts at different checkout centers.
+- Checking for open invoices.
+- Getting overdue item information
 
 ### Developed by: Elias Cassis

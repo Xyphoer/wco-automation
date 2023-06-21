@@ -1,5 +1,5 @@
 from connection import Connection
-from utils import dupeCheckouts, Fines
+from utils import dupeCheckouts, Fines, Dos
 
 # get login info
 host = "https://uwmadison.webcheckout.net"
@@ -33,10 +33,15 @@ try:
                         f"barcode: {patron['payload']['barcode']}\n\n")
         
         # create Fines object
-        fines = Fines(connection)
+        # fines = Fines(connection)
 
         # output results of searching for open fines
-        print(fines.search_open())
+        # print(fines.search_open())
+
+        # create DoS object
+        dos = Dos(connection)
+
+        dos.get_overdues()
 
 finally:
         # always close the open connection before ending
