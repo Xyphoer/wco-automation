@@ -57,7 +57,8 @@ class Connection:
     # Name: get_checkouts
     # Inputs: limit (integer)
     # Output: sorted_allocs (list)
-    # Description: Gets and sorts all allocations (checkouts) by oid
+    # Description: Gets and sorts all allocations (checkouts) by oid. Contains active types and patron information only.
+    #              Likely to be combined with get_checkouts_for_overdue later.
     #####
     def get_checkouts(self, limit = 0) -> list:
         # to hold all checkouts
@@ -80,16 +81,26 @@ class Connection:
 
         return sorted_allocs
     
+    #####
+    # Name: get_checkouts_for_overdue
+    # Inputs: None
+    # Output: sorted_allocs (dict)
+    # Description: Gets and sorts all allocations (checkouts) by center. Contains unique id (CK-####), patron information,
+    #              start time, scheduled end time, and item names.
+    #              Likely to be merged into get_checkouts later.
+    #####
     def get_checkouts_for_overdue(self):
-        sorted_allocs = {}
+        sorted_allocs = {}  # to hold dictionary of checkouts by location
 
         for center in self.centers:
+            # get checkout information from each location
             allocs = requests.post(url = self.host + "/rest/allocation/search",
                                 headers = {"Authorization": "Bearer " + self.session_token},
                                 json = {"properties": ["uniqueId", "patron", "realStartTime", "scheduledEndTime", "itemNames"], 
                                         "query": {"and": {"state": "CHECKOUT", "center": center}},
                                         "orderBy": "patronId"})
             
+            # add checkouts to center information
             sorted_allocs[center['name']] = list(allocs.json()['payload']['result'])
 
         return sorted_allocs

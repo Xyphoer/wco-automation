@@ -132,12 +132,24 @@ class Fines:
             
         return formatted_string
 
+#####
+# Name: Dos
+# Inputs: connection (Connection)
+# Description: Manage and perform operations on patrons/checkouts send to the Dean of Students
+#####
 class Dos:
 
     def __init__(self, connection: Connection):
         self.connection = connection
 
-    def dos(self):
+    #####
+    # Name: check_dos
+    # Inputs: None
+    # Output: None
+    # Description: Finds and outputs those who are submitted to the Dean of Students who no longer need to be (i.e. the returned thier item(s)).
+    #              Legacy code from previous Dos script. Will be reworked.
+    #####
+    def check_dos(self):
         allocations = []
 
         issue_file = ""
@@ -179,24 +191,38 @@ class Dos:
         else:
             input("No allocation or issue files found. Press enter to exit. ")
     
+    #####
+    # Name: get_overdues
+    # Inputs: None
+    # Output: None
+    # Description: Finds and prints checkout information for overdue checkouts. Sorted by Checkout Center.
+    #####
     def get_overdues(self):
-        tz = datetime.now() - datetime.utcnow()
-        #time_now = datetime.now(tz=timezone(tz))
-        time_now = datetime(2023, 1, 1, tzinfo=timezone(tz))
-        overdue_amount = 0
+        tz = datetime.now() - datetime.utcnow()     # get the timezone offset from utc
+        time_now = datetime.now(tz=timezone(tz))    # get the current time using found offset
+        overdue_amount = 0                          # to hold the total sum of overdues
 
+        # get dictionary of overdues
         overdues = self.connection.get_checkouts_for_overdue()
 
+        # begin output loop
         for location in overdues:
+            # ouput current checkout center
             print(">>>>>" + location)
             for checkout in overdues[location]:
+                # get the scheduled end time of the checkout and format into an appropriate comparable for time_now
                 timestamp = checkout['scheduledEndTime']
                 timestamp_formatted = datetime.strptime(timestamp, '%Y-%m-%dT%H:%M:%S.%f%z')
-                start_time = datetime.strptime(checkout['realStartTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
-                start_time = start_time.strftime("%m/%d/%Y - %I:%M:%S %p  tz: %z")
 
+                # check that the checkout is overdue
                 if timestamp_formatted < time_now:
                     overdue_amount += 1
+
+                    # Format start_time for output
+                    start_time = datetime.strptime(checkout['realStartTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+                    start_time = start_time.strftime("%m/%d/%Y - %I:%M:%S %p  tz: %z")
+
+                    # output checkout information
                     print(f"Checkout: {checkout['name']}\n" \
                           f"Patron: {checkout['patron']['name']}\n" \
                           f"Item(s): {', '.join(checkout['itemNames'])}\n" \
@@ -205,7 +231,12 @@ class Dos:
         
         print(f"Total overdue: {overdue_amount}")
 
-
-
+    #####
+    # Name: get_dos
+    # Inputs: None
+    # Output: None
+    # Description: Gets all patrons submitted to the Dean of Students and related information.
+    #              -- In progress
+    #####
     def get_dos(self):
         pass
