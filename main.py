@@ -1,5 +1,26 @@
 from connection import Connection
 from utils import dupeCheckouts, Fines, Dos
+import argparse
+
+# set up argparse
+parser = argparse.ArgumentParser(prog = "WCO Automation",
+                                 description = "Interacts with WCO to automatically perform " \
+                                 "various tasks.",
+                                 epilog = "See README for more information.")
+parser.add_argument('-dc', '--dupe_checkouts', action = 'store_true',
+                    help = "When asserted check for duplicate checkouts across all locations.")
+parser.add_argument('-cd', '--check_dos', action = 'store_true',
+                    help = 'When asserted check for patrons who have been submitted to DoS who '\
+                    'have returerned their overdue item(s).\n' \
+                    'Requires an "issues.csv" (or any csv file with "issues" in the name).\n' \
+                    '--To get appropriate issues.csv, go to https://redmine.library.wisc.edu/projects/technology-circulation/issues ' \
+                    'and export to csv (include the description).')
+parser.add_argument('-o', '--overdues', action = 'store_true',
+                    help = "When asserted output all patrons with overdue items.")
+parser.add_argument('-of', '--open_fines', action = 'store_true',
+                    help = "When asserted output all patrons with open fines.")
+
+args = parser.parse_args()
 
 # get login info
 host = "https://uwmadison.webcheckout.net"
@@ -16,32 +37,48 @@ print(a)
 try:
         print(connection.set_scope())
 
-        # get all currently active checkouts
-        checkouts = connection.get_checkouts()
+        if args.dupe_checkouts:
+                print("Checking for duplicate checkouts across locations...\n")
 
-        # create object to check for duplicate checkouts
-        dupe_checker = dupeCheckouts()
+                # get all currently active checkouts
+                checkouts = connection.get_checkouts()
 
-        # get any patrons who have duplicate items checked out (laptops and ipads only)
-        dupe_patrons = dupe_checker.patrons_with_duplicate_checkouts(checkouts, connection)
+                # create object to check for duplicate checkouts
+                dupe_checker = dupeCheckouts()
 
-        # output patron info
-        for patron in dupe_patrons:
-                patron = patron.json()
-                print(f"Name: {patron['payload']['name']}\n" +
-                        f"oid: {patron['payload']['oid']}\n" +
-                        f"barcode: {patron['payload']['barcode']}\n\n")
+                # get any patrons who have duplicate items checked out (laptops and ipads only)
+                dupe_patrons = dupe_checker.get_patrons(checkouts, connection)
+
+                # output patron info
+                for patron in dupe_patrons:
+                        patron = patron.json()
+                        print(f"Name: {patron['payload']['name']}\n" +
+                                f"oid: {patron['payload']['oid']}\n" +
+                                f"barcode: {patron['payload']['barcode']}\n\n")
         
-        # create Fines object
-        # fines = Fines(connection)
+        if args.open_fines:
+                print("Checking for patrons with open fines...\n")
 
-        # output results of searching for open fines
-        # print(fines.search_open())
+                # create Fines object
+                fines = Fines(connection)
 
-        # create DoS object
-        dos = Dos(connection)
+                # output results of searching for open fines
+                print(fines.search_open())
 
-        dos.get_overdues()
+        if args.check_dos or args.overdues:
+
+                # create DoS object
+                dos = Dos(connection)
+
+                if args.check_dos:
+                        print("Checking for DoS patrons with returned items...\n")
+
+                        dos.check_dos()
+
+                if args.overdues:
+                        print("Checking for overdue checkouts...\n")
+
+                        dos.get_overdues()
 
 finally:
         # always close the open connection before ending

@@ -83,12 +83,12 @@ class dupeCheckouts:
         return patron_duplicates
     
     #####
-    # Name: patrons_with_duplicate_checkouts
+    # Name: get_patrons
     # Inputs: sorted_allocs (list), connection (Connection)
     # Output: patrons (list)
     # Description: Get patron information for those who have duplicate checkouts
     #####
-    def patrons_with_duplicate_checkouts(self, sorted_allocs: list, connection: Connection) -> list:
+    def get_patrons(self, sorted_allocs: list, connection: Connection) -> list:
         # get oids of patrons with duplicate checkouts
         patron_oids = self.check_checkouts(sorted_allocs)
         patrons = []        # hold patrons informations
