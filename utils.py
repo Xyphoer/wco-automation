@@ -20,18 +20,30 @@ class dupeCheckouts:
     # Output: True/False (bool)
     # Description: 
     #####
-    def check_dupe_types(self, alloc_types, allocs: list) -> bool:
+    def check_dupe_types(self, current_alloc, prev_allocs: list) -> bool:
         
         # iterate over all types in the current allocation
-        for alloc_type in alloc_types:
+        for curr_alloc_type in current_alloc['activeTypes']:
             # check this type against other allocations provided in allocs
-            for alloc in allocs:
+            for prev_alloc in prev_allocs:
+
                 # only check for laptops and ipads
-                if 'laptop' in alloc_type['name'].lower() or 'ipad' in alloc_type['name'].lower():
-                    if alloc_type in alloc['activeTypes']:
+                #if 'laptop' in curr_alloc_type['name'].lower() or 'ipad' in curr_alloc_type['name'].lower():  # remove line
+                
+                # If both items are from MERIT, Skip
+                if current_alloc['checkoutCenter']['name'] != 'MERIT Library' or  prev_alloc['checkoutCenter']['name'] != 'MERIT Library':
+                    
+                    # return True for any items that are of the exact same type
+                    if curr_alloc_type in prev_alloc['activeTypes']:
                         return True
+                    
                     # check parent types
-                    if alloc_type['parent'] in [type_parent['parent'] for type_parent in alloc['activeTypes']]:
+                    # first check that the curr_alloc_type's parent type is one of the parent types from types in prev_alloc
+                    # next check if that type is one we care about <-- skip, implement priorities in config later
+                    #   Not included Accessories since only wanting to match lower types under that parent type
+                    # if both are true, return True
+                    if (curr_alloc_type['parent'] in [type_parent['parent'] for type_parent in prev_alloc['activeTypes']]) and \
+                        curr_alloc_type['parent'] != "Accessories":
                         return True
                 
         return False
@@ -55,7 +67,7 @@ class dupeCheckouts:
                 # check for checkouts of same item type for previous patron
                 while len(checkouts):
                     # get and remove a checkout from checkouts
-                    current = checkouts.pop()['activeTypes']
+                    current = checkouts.pop()
 
                     # compare current to other (if any) checkouts in checkouts
                     if self.check_dupe_types(current, checkouts):
@@ -72,7 +84,7 @@ class dupeCheckouts:
                 # check for checkouts of same item type for previous patron
                 while len(checkouts):
                     # get and remove a checkout from checkouts
-                    current = checkouts.pop()['activeTypes']
+                    current = checkouts.pop()
 
                     # compare current to other (if any) checkouts in checkouts
                     if self.check_dupe_types(current, checkouts):

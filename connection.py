@@ -68,7 +68,7 @@ class Connection:
         for center in self.centers:
             allocs = requests.post(url = self.host + "/rest/allocation/search",
                                 headers = {"Authorization": "Bearer " + self.session_token},
-                                json = {"properties": ["patron", "activeTypes"], 
+                                json = {"properties": ["patron", "activeTypes", "checkoutCenter"], 
                                         "query": {"and": {"state": "CHECKOUT", "center": center}},
                                         #"limit": limit,
                                         "orderBy": "patronId"})
