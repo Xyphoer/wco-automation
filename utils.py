@@ -186,7 +186,7 @@ class Dos:
 
             allocations.sort(key=lambda allocation: int(allocation[1][3:]))
 
-            for allocation in allocations:
+            for allocation in allocations.copy():
                 
                 if self.connection.get_checkout(allocation[1]).json()['payload']['result'][0]['state'] == 'CHECKOUT':
                     allocations.remove(allocation)
