@@ -3,7 +3,7 @@ import requests
 #####
 # Name: Connection
 # Inputs: userid (string), password (string), host (string)
-# Description: Manage connection to WebCheckout, including post and get requests and session information.
+# Description: Manage connection to WebCheckout, including put and get requests and session information.
 #####
 class Connection:
     def __init__(self, userid: str, password: str, host: str):
@@ -81,6 +81,16 @@ class Connection:
 
         return sorted_allocs
     
+    def get_new_overdues(self) -> list:
+
+        allocs = requests.post(url = self.host + "/rest/allocation/search",
+                               headers = {"authorization": "Bearer " + self.session_token},
+                               json = {"properties": ["uniqueId", "patron", "patronPreferredEmail", "scheduledEndTime", "note", "itemNames"],
+                                       "query": {"and": {"state": "CHECKOUT", "center": self.college}},
+                                       "orderBy": "patronId"})
+        
+        return allocs
+    
     #####
     # Name: get_checkouts_for_overdue
     # Inputs: None
@@ -122,7 +132,7 @@ class Connection:
     # Output: Patron information
     # Description: Get patron information using their oid
     #####
-    def get_patron(self, patron_oid: str):
+    def get_patron(self, patron_oid: int):
         return requests.post(url = self.host + "/rest/person/get",
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"oid": patron_oid})
