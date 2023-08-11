@@ -29,4 +29,15 @@
                                 patron name & id number, invoice number, outstanding balance, and WCO link to invoice.
 ```
 
+#### CONFIG:
+This program supports a config file with the following format:
+
+```
+wco_host=https://url.to.host
+wco_user_id=user
+wco_password=password
+```
+
+If the information is not able to be found in the config file, the program will prompt you directly.
+
 ### Developed by: Elias Cassis
