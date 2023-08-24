@@ -1,6 +1,10 @@
-# Program for automatic interfacing with [WebCheckouts api](https://api.webcheckout.net)
+# InfoLab WebCheckout Automatic Helper
+Program for automatic interfacing with [WebCheckouts api](https://api.webcheckout.net).
+The program's primary purpose is to automate common, procedural tasks with relation to WebCheckout, as well as perform more complicated searches that are difficult to perform manually.
 
-## Current capabilities:
+## Details:
+
+### Current capabilities:
 - Checking for duplicate resource type checkouts at different checkout centers.
 - Checking for open invoices.
 - Getting overdue item information
@@ -9,7 +13,7 @@
 ## Usage:
 `main.py [OPTIONS]`
 
-#### OPTIONS:
+### OPTIONS:
 ```
 -dc, --dupe_checkouts           Searches for duplicate checkouts across all locations.
                                 Respects MERITs policies.
@@ -29,7 +33,7 @@
                                 patron name & id number, invoice number, outstanding balance, and WCO link to invoice.
 ```
 
-#### CONFIG:
+### CONFIG:
 This program supports a config file with the following format:
 
 ```
@@ -40,4 +44,7 @@ wco_password=password
 
 If the information is not able to be found in the config file, the program will prompt you directly.
 
-### Developed by: Elias Cassis
+## Support
+Developer: Elias Cassis
+
+Area: Internal Tools
