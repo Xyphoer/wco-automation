@@ -79,29 +79,29 @@ try:
                   f"oid: {patron['payload']['oid']}\n" +
                   f"barcode: {patron['payload']['barcode']}\n\n")
         
-        if args.open_fines:
-            print("Checking for patrons with open fines...\n")
+    if args.open_fines:
+        print("Checking for patrons with open fines...\n")
 
-            # create Fines object
-            fines = Fines(connection)
+        # create Fines object
+        fines = Fines(connection)
 
-            # output results of searching for open fines
-            print(fines.search_open())
+        # output results of searching for open fines
+        print(fines.search_open())
 
-        if args.check_dos or args.overdues:
+    if args.check_dos or args.overdues:
 
-            # create DoS object
-            dos = Dos(connection)
+        # create DoS object
+        dos = Dos(connection)
 
-            if args.check_dos:
-                print("Checking for DoS patrons with returned items...\n")
+        if args.check_dos:
+            print("Checking for DoS patrons with returned items...\n")
 
-                dos.check_dos()
+            dos.check_dos()
 
-                if args.overdues:
-                    print("Checking for overdue checkouts...\n")
+        if args.overdues:
+            print("Checking for overdue checkouts...\n")
 
-                    dos.get_overdues()
+            dos.get_overdues()
 
 finally:
      # always close the open connection before ending
