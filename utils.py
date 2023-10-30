@@ -252,3 +252,35 @@ class Dos:
     #####
     def get_dos(self):
         pass
+
+#####
+# Name: utils
+# Inputs: connection (Connection)
+# Description: Manage basic quality of life operations
+#####
+class utils:
+
+    def __init__(self, connection: Connection):
+        self.connection = connection
+    
+    def search_by_serial(self, filename):
+        serials = []
+        results = []
+
+        try:
+            with open(filename, 'r') as infile:
+                serials = infile.read().split()
+
+        except (FileNotFoundError, PermissionError) as err:
+            print(err)
+
+        if serials:        
+            for response, serial in zip(self.connection.get_items_by_serial(serials), serials):
+                items = response.json()['payload']['result']
+                if items:
+                    out_string = f"Serial: {serial} - {', '.join(item['uniqueId'] + ' ' + item['statusString'] for item in items)}"
+                    results.append(out_string)
+                else:
+                    results.append(f"Serial: {serial} - Not Found")
+        
+        return results

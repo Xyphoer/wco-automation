@@ -81,12 +81,22 @@ class Connection:
 
         return sorted_allocs
     
-    def get_new_overdues(self) -> list:
+    def get_new_overdues_college(self) -> list:
 
         allocs = requests.post(url = self.host + "/rest/allocation/search",
                                headers = {"authorization": "Bearer " + self.session_token},
                                json = {"properties": ["uniqueId", "patron", "patronPreferredEmail", "scheduledEndTime", "note", "itemNames"],
                                        "query": {"and": {"state": "CHECKOUT", "center": self.college}},
+                                       "orderBy": "patronId"})
+        
+        return allocs
+    
+    def get_new_overdues_memorial(self) -> list:
+
+        allocs = requests.post(url = self.host + "/rest/allocation/search",
+                               headers = {"authorization": "Bearer " + self.session_token},
+                               json = {"properties": ["uniqueId", "patron", "patronPreferredEmail", "scheduledEndTime", "note", "itemNames"],
+                                       "query": {"and": {"state": "CHECKOUT", "center": self.memorial}},
                                        "orderBy": "patronId"})
         
         return allocs
@@ -125,6 +135,20 @@ class Connection:
         return requests.post(url = self.host + "/rest/allocation/search",
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"query": {"uniqueId": id}})
+    
+    #####
+    # Name: get_items_by_serial
+    # Inputs: serial (list)
+    # Output: resource information
+    # Description: Gets the CK-### id, oid, and item name for each item of a list of items by serial number
+    #####
+    def get_items_by_serial(self, serial: list):
+        for number in serial:
+            response = requests.post(url = self.host + "/rest/resource/search",
+                        headers = {"Authorization": "Bearer " + self.session_token},
+                        json = {"properties": ["uniqueId", "oid", "statusString"],
+                        "query": {"serialNumber": number}})
+            yield(response)
     
     #####
     # Name: get_patron

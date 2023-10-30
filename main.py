@@ -1,5 +1,5 @@
 from connection import Connection
-from utils import dupeCheckouts, Fines, Dos
+from utils import *
 import argparse
 
 # set up argparse
@@ -19,6 +19,10 @@ parser.add_argument('-o', '--overdues', action = 'store_true',
                     help = "When asserted output all patrons with overdue items.")
 parser.add_argument('-of', '--open_fines', action = 'store_true',
                     help = "When asserted output all patrons with open fines.")
+parser.add_argument('-ss', '--serial_search', action = 'store',
+                    help = 'Search for items by serial number. Input must be a text file of serial numbers seprated by newlines.' \
+                    'Outputs the corresponding item (if found) and its status.' \
+                    'Example usage: main.py -ss in_file.txt')
 
 args = parser.parse_args()
 
@@ -102,6 +106,15 @@ try:
             print("Checking for overdue checkouts...\n")
 
             dos.get_overdues()
+    
+    if args.serial_search:
+        print("Performing search by serial numbers...\n")
+
+        utils = utils(connection)
+
+        ss_results_list = utils.search_by_serial(args.serial_search)
+
+        print("\n".join(ss_results_list))
 
 finally:
      # always close the open connection before ending
