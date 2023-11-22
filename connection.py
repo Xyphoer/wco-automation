@@ -1,4 +1,5 @@
 import requests
+from datetime import datetime, timedelta
 
 #####
 # Name: Connection
@@ -81,6 +82,7 @@ class Connection:
 
         return sorted_allocs
     
+    ##>>>>> rewrite
     def get_new_overdues_college(self) -> list:
 
         allocs = requests.post(url = self.host + "/rest/allocation/search",
@@ -91,6 +93,7 @@ class Connection:
         
         return allocs
     
+    ##>>>> rewrite
     def get_new_overdues_memorial(self) -> list:
 
         allocs = requests.post(url = self.host + "/rest/allocation/search",
@@ -161,6 +164,22 @@ class Connection:
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"oid": patron_oid})
     
+    def get_account(self, patron_oid: int):
+        return requests.post(url = self.host + "/rest/person/get",
+                             headers = {"Authorization": "Bearer " + self.session_token},
+                             json = {"oid": patron_oid,
+                                    "properties": ["defaultAccount"]})
+    
+    def get_completed_overdue_allocations(self, start_time: datetime, end_time: datetime):
+        earliest_actual_end = start_time.isoformat()
+        latest_scheduled_end = (start_time - timedelta(minutes=10)).isoformat()  # 10 minute grace period
+        latest_actual_end = end_time.isoformat()
+
+        return requests.post(url = self.host + "/rest/allocation/search",
+                             headers = {"Authorization": "Bearer " + self.session_token},
+                             json = {"query": {"and": {"earliestActualEnd": earliest_actual_end, "latestScheduledEnd": latest_scheduled_end, "latestActualEnd": latest_actual_end}},
+                                     "properties": ["oid", "patron", "itemCount", "allTypes", "scheduledEndTime", "realEndTime"]})
+    
     #####
     # Name: get_open_invoices
     # Inputs: None
@@ -187,6 +206,12 @@ class Connection:
                              json = {"account": account,
                                      "organization": organization,
                                      "checkoutCenter": center})
+
+    def apply_invoice_hold(self, invoice, comment: str):
+        return requests.post(url = self.host + "/rest/invoice/applyHold",
+                             headers = {"Authorization": "Bearer " + self.session_token},
+                             json = {"invoice": invoice,
+                                     "comment": comment})
     
     #####
     # Name: add_charge

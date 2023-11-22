@@ -284,3 +284,127 @@ class utils:
                     results.append(f"Serial: {serial} - Not Found")
         
         return results
+    
+    def get_overdue_consequence(self, allocation) -> (dict, datetime):
+        type_buckets = []
+        reserve = False
+        for resource_type in allocation['allTypes']:
+            type_buckets.append('Accessories' if 'accessories' in resource_type['path'].lower() else 'Non Accessory')
+            reserve = True if 'reserve' in resource_type['path'].lower() or reserve else False
+        
+        end_time = datetime.strptime(allocation['realEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+
+        overdue_length = end_time - datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+
+        results = Repercussions(overdue_length.days)
+
+        results.update(type_buckets)
+        
+        return results.final_consequences, end_time
+
+class Repercussions:
+
+    def __init__(self, overdue_length: int):
+        self.resource_type_consequence_mapping = {
+            'Accessories': {
+                # Up to 1 day
+                0: {
+                    'Hold': 0,
+                    'Fee': False,
+                    'Registrar Hold': False
+                },
+                # More than 1 day
+                1: {
+                    'Hold': overdue_length,  # length of overdue
+                    'Fee': False,
+                    'Registrar Hold': False
+                },
+                # More than 10 days
+                10: {
+                    'Hold': 30,
+                    'Fee': True,
+                    'Registrar Hold': False
+                },
+                # More than 20 days
+                20: {
+                    'Hold': 30,
+                    'Fee': True,
+                    'Registrar Hold': False
+                }
+            },
+            'Non Accessory': {
+                # Up to 1 day
+                0: {
+                    'Hold': 0,
+                    'Fee': False,
+                    'Registrar Hold': False
+                },
+                # More than 1 day
+                1: {
+                    'Hold': overdue_length,  # length of overdue
+                    'Fee': False,
+                    'Registrar Hold': False
+                },
+                # More than 10 days
+                10: {
+                    'Hold': 30,
+                    'Fee': False,
+                    'Registrar Hold': False
+                },
+                # More than 20 days
+                20: {
+                    'Hold': 30,
+                    'Fee': True,
+                    'Registrar Hold': True
+                }
+            },
+            'Reserve': {
+                # Up to 1 day
+                0: {
+                    'Hold': 5,
+                    'Fee': False,
+                    'Registrar Hold': False
+                },
+                # More than 1 day
+                1: {
+                    'Hold': 10,
+                    'Fee': False,
+                    'Registrar Hold': False
+                },
+                # More than 10 days
+                10: {
+                    'Hold': 30,
+                    'Fee': False,
+                    'Registrar Hold': False
+                },
+                # More than 20 days
+                20: {
+                    'Hold': 30,
+                    'Fee': True,
+                    'Registrar Hold': True
+                }
+            }
+        }
+        self.final_consequences = {
+            'Hold': 0,
+            'Fee': False,
+            'Registrar Hold': False
+        }
+        self.upper_limits = (0, 1, 10, 20)
+        self.overdue_length = self.ceil(overdue_length)
+
+    def get(self, idx):
+        return self.resource_type_consequence_mapping[idx][self.overdue_length]
+    
+    def ceil(self, idx):
+        out = 0
+        for limit in self.upper_limits:
+            if idx > limit:
+                out = limit
+        return out
+    
+    def update(self, buckets):
+        for bucket in buckets:
+            self.final_consequences['Hold'] = max(self.final_consequences['Hold'], self.get(bucket)['Hold'])
+            self.final_consequences['Fee'] = True if self.get(bucket)['Fee'] or self.final_consequences['Fee'] else False
+            self.final_consequences['Registrar Hold'] = True if self.get(bucket)['Registrar Hold'] or self.final_consequences['Registrar Hold'] else False
