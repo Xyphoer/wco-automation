@@ -285,7 +285,7 @@ class utils:
         
         return results
     
-    def get_overdue_consequence(self, allocation) -> (dict, datetime):
+    def get_overdue_consequence(self, allocation) -> (dict, datetime, dict):
         type_buckets = []
         reserve = False
         for resource_type in allocation['allTypes']:
@@ -300,7 +300,7 @@ class utils:
 
         results.update(type_buckets)
         
-        return results.final_consequences, end_time
+        return results.final_consequences, end_time, allocation['checkoutCenter']
 
 class Repercussions:
 

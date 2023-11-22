@@ -23,7 +23,7 @@ class Overdues:
 
         for allocation in response.json()['payload']['result']:
             
-            conseq, end_time = self.utils.get_overdue_consequence(allocation)
+            conseq, end_time, checkout_center = self.utils.get_overdue_consequence(allocation)
             # add initial stop date (to not count past when we start)
 
             ### Set hold end time to start counting from once replacement fee is paid (if applicable)
@@ -33,17 +33,21 @@ class Overdues:
                 insert_dict[allocation['patron']['oid']][1:] = ['True' if conseq['Hold'] else 'False',  # hold_status
                                                                 'True' if conseq['Fee'] else 'False',   # fee_status
                                                                 conseq['Hold'],                         # hold_length
-                                                                f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL']   # hold_remove_time
+                                                                f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time
+                                                                checkout_center]    # checkout center for hold
 
             except KeyError as e:
                 insert_dict[allocation['patron']['oid']] = [allocation['itemCount'],
                                                             'True' if conseq['Hold'] else 'False',  # hold_status
                                                             'True' if conseq['Fee'] else 'False',   # fee_status
                                                             conseq['Hold'],                         # hold_length
-                                                            f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL'] # hold_remove_time
+                                                            f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time
+                                                            checkout_center]    # checkout center for hold
 
         for key, value in insert_dict.items():
             if value[2] == 'True': value[4] = 'NULL'
+
+            #if value[1] == 'True': self.place_hold(key, end=value[4], checkout_center=value[5], message="")
 
             insert_query += f"({key}, {value[0]}, {value[1]}, {value[2]}, {value[3]}, {value[4]}),\n" 
         
@@ -83,12 +87,12 @@ class Overdues:
         # incease a patron overdue item count by amount. Returnes a tuple of (before_count, after_count)
         pass
 
-    def place_hold(self, oid: int, end: datetime, checkout_center):
+    def place_hold(self, oid: int, end, checkout_center, message):
         account = self.connection.get_account(oid).json()
         invoice = self.connection.create_invoice(account['payload']['defaultAccount'], account['session']['organization'], checkout_center).json()
-        hold = self.connection.apply_invoice_hold(invoice['payload'], "Test")
+        hold = self.connection.apply_invoice_hold(invoice['payload'], message)
 
-        self.db.run(f"UPDATE overdues SET hold_status = True, hold_remove_time = '{end.isoformat().replace('T', ' ')}' WHERE patron_oid = {oid}")
+        self.db.run(f"UPDATE overdues SET hold_status = True, hold_remove_time = '{end}' WHERE patron_oid = {oid}")
 
     #def remove_hold(self)
 
