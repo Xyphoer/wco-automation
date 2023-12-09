@@ -1,4 +1,5 @@
 from connection import Connection
+from redmine import RedmineConnection
 from utils import *
 import argparse
 
@@ -23,6 +24,11 @@ parser.add_argument('-ss', '--serial_search', action = 'store',
                     help = 'Search for items by serial number. Input must be a text file of serial numbers seprated by newlines.' \
                     'Outputs the corresponding item (if found) and its status.' \
                     'Example usage: main.py -ss in_file.txt')
+parser.add_argument('-ru', '--redmine_update', nargs='*',
+                    help = 'Updates redmine overdue tickets if they\'ve been returned.' \
+                    'Outputs phone numbers for each location and redmine template for ticket creation.' \
+                    'Format: start_date end_date centers_to_consider' \
+                    'Example usage: main.py -ru mm/dd/yyyy mm/dd/yyyy center1 center2')
 
 args = parser.parse_args()
 
@@ -30,21 +36,43 @@ args = parser.parse_args()
 wco_host = ''
 wco_userid = ''
 wco_password = ''
+redmine_host = ''
+redmine_session_cookie = ''
+redmine_auth_key = ''
+shibsession_cookie_name = ''
+shibsession_cookie_value = ''
+project_query_ext = ''
 
 try:
     with open('config.txt', 'r', encoding='utf-8') as in_file:
         for line in in_file:
             if "wco_host" in line.lower():
-                wco_host = line.split("=")[1].strip()
-            if "wco_user_id" in line.lower():
-                wco_userid = line.split("=")[1].strip()
-            if "wco_password" in line.lower():
-                wco_password = line.split("=")[1].strip()
+                wco_host = line.split("=", maxsplit=1)[1].strip()
+            elif "wco_user_id" in line.lower():
+                wco_userid = line.split("=", maxsplit=1)[1].strip()
+            elif "wco_password" in line.lower():
+                wco_password = line.split("=", maxsplit=1)[1].strip()
+            elif "redmine_host" in line.lower():
+                redmine_host = line.split("=", maxsplit=1)[1].strip()
+            elif "redmine_session_cookie" in line.lower():
+                redmine_session_cookie = line.split("=", maxsplit=1)[1].strip()
+            elif "shibsession_cookie_name" in line.lower():
+                shibsession_cookie_name = line.split("=", maxsplit=1)[1].strip()
+            elif "shibsession_cookie_value" in line.lower():
+                shibsession_cookie_value = line.split("=", maxsplit=1)[1].strip()
+            elif "redmine_auth_key" in line.lower():
+                redmine_auth_key = line.split("=", maxsplit=1)[1].strip()
+            elif "project_query_ext" in line.lower():
+                project_query_ext = line.split("=", maxsplit=1)[1].strip()
                 
-except FileNotFoundError as e:  #OSError (all) - or need Permission error
+except OSError as e:  # file not found or permission error
         wco_host = input("WebCheckout host: ")
         wco_userid = input("WebCheckout user id: ")
         wco_password = input("WebCheckout Password: ")
+        redmine_host = input("Redmine host: ")
+        redmine_session_cookie = input("redmine_session_cookie: ")
+        shibsession_cookie_name = input("_shibsession cookie name: ")
+        shibsession_cookie_value = input("_shibsession cookie value: ")
 
 finally:
     if not wco_host:
@@ -52,29 +80,29 @@ finally:
     if not wco_userid:
         wco_userid = input("WebCheckout user id: ")
     if not wco_password:
-        wco_password = line.split("=")[1].strip()
+        wco_password = input("WebCheckout password: ")
 
 
 # create connection
-connection = Connection(wco_userid, wco_password, wco_host)
+wco_connection = Connection(wco_userid, wco_password, wco_host)
 
 # createa connection to WCO
-a = connection.start_session()
+a = wco_connection.start_session()
 print(a)
 
 try:
-    print(connection.set_scope())
+    print(wco_connection.set_scope())
     if args.dupe_checkouts:
         print("Checking for duplicate checkouts across locations...\n")
 
         # get all currently active checkouts
-        checkouts = connection.get_checkouts()
+        checkouts = wco_connection.get_checkouts()
 
         # create object to check for duplicate checkouts
         dupe_checker = dupeCheckouts()
 
         # get any patrons who have duplicate items checked out (laptops and ipads only)
-        dupe_patrons = dupe_checker.get_patrons(checkouts, connection)
+        dupe_patrons = dupe_checker.get_patrons(checkouts, wco_connection)
 
         # output patron info
         for patron in dupe_patrons:
@@ -87,7 +115,7 @@ try:
         print("Checking for patrons with open fines...\n")
 
         # create Fines object
-        fines = Fines(connection)
+        fines = Fines(wco_connection)
 
         # output results of searching for open fines
         print(fines.search_open())
@@ -95,7 +123,7 @@ try:
     if args.check_dos or args.overdues:
 
         # create DoS object
-        dos = Dos(connection)
+        dos = Dos(wco_connection)
 
         if args.check_dos:
             print("Checking for DoS patrons with returned items...\n")
@@ -110,13 +138,34 @@ try:
     if args.serial_search:
         print("Performing search by serial numbers...\n")
 
-        utils = utils(connection)
+        utils = utils(wco_connection)
 
         ss_results_list = utils.search_by_serial(args.serial_search)
 
         print("\n".join(ss_results_list))
+    
+    if args.redmine_update:
+        print("Performing redmine update...\n")
+
+        if not redmine_host:
+            redmine_host = input("redmine host: ")
+        if not shibsession_cookie_name:
+            wco_userid = input("shibsession cookie name: ")
+        if not shibsession_cookie_value:
+            wco_password = input("shibsession cookie value: ")
+        if not redmine_session_cookie:
+            redmine_host = input("redmine session cookie: ")
+        if not redmine_auth_key:
+            wco_userid = input("redmine auth key: ")
+        if not project_query_ext:
+            project_query_ext = input("project query ext: ")
+
+        rm_connection = RedmineConnection(wco_connection, redmine_host, shibsession_cookie_name, shibsession_cookie_value, redmine_session_cookie, redmine_auth_key)
+
+        rm_connection.process_working_overdues(project_query_ext=project_query_ext)
+        rm_connection.process_new_overdues(start=args.redmine_update[0], end=args.redmine_update[1], centers=args.redmine_update[2:])
 
 finally:
      # always close the open connection before ending
-    connection.close()
+    wco_connection.close()
     print("Closed Connection.")

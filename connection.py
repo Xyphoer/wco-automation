@@ -20,6 +20,7 @@ class Connection:
         self.session_token = self.current_session.json()['sessionToken']
 
         # get and store checkout center information
+        # Compress into just dict?
         self.college = self.current_session.json()['payload']['roles']['operator'][1]
         self.business = self.current_session.json()['payload']['roles']['operator'][0]
         self.ebling = self.current_session.json()['payload']['roles']['operator'][3]
@@ -27,7 +28,14 @@ class Connection:
         self.steenbock = self.current_session.json()['payload']['roles']['operator'][8]
         self.memorial = self.current_session.json()['payload']['roles']['operator'][6]
         self.merit = self.current_session.json()['payload']['roles']['operator'][5]
-        self.centers = [self.college, self.business, self.ebling, self.social, self.steenbock, self.memorial, self.merit]
+        self.centers = {
+            "college": self.college,
+            "business": self.business,
+            "ebling": self.ebling,
+            "social": self.social,
+            "steenbock": self.steenbock,
+            "memorial": self.memorial,
+            "merit": self.merit}
 
         # set the scope to College to start
         self.scope = self.set_scope()
@@ -82,25 +90,20 @@ class Connection:
 
         return sorted_allocs
     
-    ##>>>>> rewrite
-    def get_new_overdues_college(self) -> list:
-
-        allocs = requests.post(url = self.host + "/rest/allocation/search",
-                               headers = {"authorization": "Bearer " + self.session_token},
-                               json = {"properties": ["uniqueId", "patron", "patronPreferredEmail", "scheduledEndTime", "note", "itemNames"],
-                                       "query": {"and": {"state": "CHECKOUT", "center": self.college}},
-                                       "orderBy": "patronId"})
+    def get_new_overdues(self, center) -> list:
+        allocs = []
         
-        return allocs
-    
-    ##>>>> rewrite
-    def get_new_overdues_memorial(self) -> list:
+        try:
+            center = self.centers[center]
 
-        allocs = requests.post(url = self.host + "/rest/allocation/search",
-                               headers = {"authorization": "Bearer " + self.session_token},
-                               json = {"properties": ["uniqueId", "patron", "patronPreferredEmail", "scheduledEndTime", "note", "itemNames"],
-                                       "query": {"and": {"state": "CHECKOUT", "center": self.memorial}},
-                                       "orderBy": "patronId"})
+            allocs = requests.post(url = self.host + "/rest/allocation/search",
+                                headers = {"authorization": "Bearer " + self.session_token},
+                                json = {"properties": ["uniqueId", "patron", "patronPreferredEmail", "scheduledEndTime", "note", "itemNames"],
+                                        "query": {"and": {"state": "CHECKOUT", "center": self.centers[center]}},
+                                        "orderBy": "patronId"})
+        
+        except IndexError as e:
+            pass # Log error
         
         return allocs
     

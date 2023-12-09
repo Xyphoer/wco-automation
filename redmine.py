@@ -15,12 +15,14 @@ class RedmineConnection:
         self.session.cookies.set('_redmine_session', redmine_session_cookie)
         self.session.cookies.set(shib_session_cookie_name, shib_session_cookie_value)
 
-    def process_working_overdues(self):
-        # Working on it query in Tech Circ
-        response = self.session.get(url=self.host + "/issues.json?project_id=171&status_id=14", auth=(self.redmine_auth_key, ''))
+    def process_working_overdues(self, project_query_ext):
+        response = self.session.get(url=self.host + project_query_ext, auth=(self.redmine_auth_key, ''))
 
         tz = datetime.now() - datetime.utcnow()     # get the timezone offset from utc
         time_now = datetime.now(tz=timezone(tz))    # get the current time using found offset
+
+        follow_up_text = f"Texted {time_now.strftime('%m/%d/%y')}."
+        phone_numbers = []
 
         for issue in response.json()['issues']:
             
@@ -61,19 +63,49 @@ class RedmineConnection:
 
                 ## TIDY UP
 
-                if update_text and False not in x:
+                if update_text:
                     print(f"Ticket #{issue['id']} updated with:\n{update_text}\n")
-                    self.session.put(url=f'https://redmine.library.wisc.edu/issues/{issue["id"]}.json',
-                                      auth=(self.redmine_auth_key, ''),
-                                      json={'issue': {'status_id': 10, 'notes': update_text}})
+                    if False not in x:
+                        # resolve
+                        self.session.put(url=f'https://redmine.library.wisc.edu/issues/{issue["id"]}.json',
+                                        auth=(self.redmine_auth_key, ''),
+                                        json={'issue': {'status_id': 10, 'notes': update_text}})
+                    else:
+                        # update with changes to checkouts (still overdue)
+                        self.session.put(url=f'https://redmine.library.wisc.edu/issues/{issue["id"]}.json',
+                                        auth=(self.redmine_auth_key, ''),
+                                        json={'issue': {'notes': update_text}})
+                
+                # ## follow up texting
+                # else:
+                #     print(f"Ticket #{issue['id']} updated with: {follow_up_text}")
+                #     self.session.put(url=f'https://redmine.library.wisc.edu/issues/{issue["id"]}.json',
+                #                         auth=(self.redmine_auth_key, ''),
+                #                         json={'issue': {'notes': follow_up_text}})
+                    
+                #     # get phone number
+                #     number_pos = curr_ticket['issue']['description'].find('Phone #:')
+
+                #     if number_pos != -1:
+                #         end_pos = curr_ticket['issue']['description'].find('\n', number_pos)
+
+                #         number = "".join(re.findall('\d+', curr_ticket['issue']['description'][number_pos:end_pos]))
+                #         if len(number) == 1:   # remove 1 from +1 if present
+                #             number = number[1:]
+
+                #         phone_number = "+1" + number
+
+                #         phone_numbers[-1] = phone_number
+        
+        # print phone numbers
     
-    def process_new_overdues(self, start, end):
+    def process_new_overdues(self, start, end, centers):
         time_now = datetime.now()
 
         start_formatted = datetime.strptime(start, '%m/%d/%Y')
         end_formatted = datetime.strptime(end, '%m/%d/%Y') + timedelta(hours=23, minutes=59, seconds=59)
 
-        checkouts = {'College': wco_conn.get_new_overdues_college().json()['payload']['result'], 'Memorial': wco_conn.get_new_overdues_memorial().json()['payload']['result']}
+        checkouts = {center:wco_conn.get_new_overdues(center.lower()).json()['payload']['result'] for center in centers}
 
         for location in checkouts:
             print(f"---{location}---\n")
@@ -148,48 +180,3 @@ class RedmineConnection:
 
             print(", ".join(phone_numbers))
             print(f"Total: {len(phone_numbers)}")
-
-# get info
-wco_host = ''
-wco_userid = ''
-wco_password = ''
-redmine_host = ''
-redmine_session_cookie = ''
-redmine_auth_key = ''
-shibsession_cookie_name = ''
-shibsession_cookie_value = ''
-
-try:
-    with open('config.txt', 'r', encoding='utf-8') as in_file:
-        for line in in_file:
-            if "wco_host" in line.lower():
-                wco_host = line.split("=")[1].strip()
-            if "wco_user_id" in line.lower():
-                wco_userid = line.split("=")[1].strip()
-            if "wco_password" in line.lower():
-                wco_password = line.split("=")[1].strip()
-            if "redmine_host" in line.lower():
-                redmine_host = line.split("=")[1].strip()
-            if "redmine_session_cookie" in line.lower():
-                redmine_session_cookie = line.split("=")[1].strip()
-            if "shibsession_cookie_name" in line.lower():
-                shibsession_cookie_name = line.split("=")[1].strip()
-            if "shibsession_cookie_value" in line.lower():
-                shibsession_cookie_value = line.split("=")[1].strip()
-            if "redmine_auth_key" in line.lower():
-                redmine_auth_key = line.split("=")[1].strip()
-                
-except OSError as e:
-        wco_host = input("WebCheckout host: ")
-        wco_userid = input("WebCheckout user id: ")
-        wco_password = input("WebCheckout Password: ")
-        redmine_host = input("Redmine host: ")
-        redmine_session_cookie = input("redmine_session_cookie: ")
-        shibsession_cookie_name = input("_shibsession cookie name: ")
-        shibsession_cookie_value = input("_shibsession cookie value: ")
-
-
-wco_conn = Connection(wco_userid, wco_password, wco_host)
-rconn = RedmineConnection(wco_conn, redmine_host, shibsession_cookie_name, shibsession_cookie_value, redmine_session_cookie, redmine_auth_key)
-rconn.process_working_overdues()
-rconn.process_new_overdues('11/19/2023', '11/20/2023')
