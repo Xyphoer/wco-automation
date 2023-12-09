@@ -105,7 +105,7 @@ class RedmineConnection:
         start_formatted = datetime.strptime(start, '%m/%d/%Y')
         end_formatted = datetime.strptime(end, '%m/%d/%Y') + timedelta(hours=23, minutes=59, seconds=59)
 
-        checkouts = {center:wco_conn.get_new_overdues(center.lower()).json()['payload']['result'] for center in centers}
+        checkouts = {center:self.wco_connection.get_new_overdues(center.lower()).json()['payload']['result'] for center in centers}
 
         for location in checkouts:
             print(f"---{location}---\n")
