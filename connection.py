@@ -94,8 +94,6 @@ class Connection:
         allocs = []
         
         try:
-            center = self.centers[center]
-
             allocs = requests.post(url = self.host + "/rest/allocation/search",
                                 headers = {"authorization": "Bearer " + self.session_token},
                                 json = {"properties": ["uniqueId", "patron", "patronPreferredEmail", "scheduledEndTime", "note", "itemNames"],
