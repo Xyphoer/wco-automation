@@ -26,7 +26,7 @@ class RedmineConnection:
 
         for issue in response.json()['issues']:
             
-            if "overdue" in issue['subject'].lower() and "contact log" in issue['subject'].lower():
+            if "overdue" in issue['subject'].lower() and "contact log" in issue['subject'].lower() and "dos" not in issue['subject'].lower():
 
                 regex = re.compile("CK- *\d+")
                 checkouts = regex.findall(issue['description'])
@@ -191,7 +191,7 @@ class RedmineConnection:
                                     phone_numbers[-1] = phone_number
 
                     else:
-                        #### FIX so that doesn't include returned part of partially returned allocation in overdue list (subject)
+                        #### FIX so that doesn't include returned part of partially returned allocation in overdue list (subject) [use contents, see tmp.txt]
                         issue_description = (f"{checkout['patron']['name']} - {checkout['patronPreferredEmail']}\n" \
                                                 f"Overdue {', '.join(checkout.split(' - ')[-1] for checkout in checkout['itemNames'])} - Contact Log\n" \
                                                 f"Item Due {timestamp_formatted.strftime('%m/%d/%Y')}\n\n" \
