@@ -22,7 +22,7 @@ class RedmineConnection:
         time_now = datetime.now(tz=timezone(tz))    # get the current time using found offset
 
         follow_up_text = f"Texted {time_now.strftime('%m/%d/%y')}."
-        phone_numbers = []
+        phone_numbers = {'Unknown Computer Lab': []}
 
         for issue in response.json()['issues']:
             
@@ -64,7 +64,6 @@ class RedmineConnection:
                 ## TIDY UP
 
                 if update_text:
-                    print(f"Ticket #{issue['id']} updated with:\n{update_text}\n")
                     if False not in x:
                         # resolve
                         self.session.put(url=f'https://redmine.library.wisc.edu/issues/{issue["id"]}.json',
@@ -75,29 +74,58 @@ class RedmineConnection:
                         self.session.put(url=f'https://redmine.library.wisc.edu/issues/{issue["id"]}.json',
                                         auth=(self.redmine_auth_key, ''),
                                         json={'issue': {'notes': update_text}})
+                    print(f"Ticket #{issue['id']} updated with:\n{update_text}\n")
                 
-                # ## follow up texting
-                # else:
-                #     print(f"Ticket #{issue['id']} updated with: {follow_up_text}")
-                #     self.session.put(url=f'https://redmine.library.wisc.edu/issues/{issue["id"]}.json',
-                #                         auth=(self.redmine_auth_key, ''),
-                #                         json={'issue': {'notes': follow_up_text}})
+                ## follow up texting
+                else:
+                    follow_up_ticket = self.session.get(url=self.host + f"/issues/{issue['id']}.json?include=journals", auth=(self.redmine_auth_key, '')).json()['issue']
+
+                    dos_pos = -1
+                    time_ago = None
+                    for journal in follow_up_ticket['journals']:
+                        dos_pos = journal['notes'].lower().find('dos:')
+                        if dos_pos != -1:
+                            dos_end_pos = journal['notes'].find('\n', dos_pos)
+                            time_ago = datetime.strptime(journal['notes'][dos_pos:dos_end_pos].split()[1], '%m/%d/%Y') - datetime.now()
                     
-                #     # get phone number
-                #     number_pos = curr_ticket['issue']['description'].find('Phone #:')
+                    if time_ago and time_ago.days < 2:
+                        self.session.put(url=f'https://redmine.library.wisc.edu/issues/{follow_up_ticket["id"]}.json',
+                                            auth=(self.redmine_auth_key, ''),
+                                            json={'issue': {'notes': follow_up_text}})
+                        print(f"Ticket #{follow_up_ticket['id']} updated with:\n{follow_up_text}\n")
+                        
+                        # get phone number
+                        number_pos = follow_up_ticket['description'].find('Phone #:')
 
-                #     if number_pos != -1:
-                #         end_pos = curr_ticket['issue']['description'].find('\n', number_pos)
+                        if number_pos != -1:
+                            end_pos = follow_up_ticket['description'].find('\n', number_pos)
 
-                #         number = "".join(re.findall('\d+', curr_ticket['issue']['description'][number_pos:end_pos]))
-                #         if len(number) == 1:   # remove 1 from +1 if present
-                #             number = number[1:]
+                            number = "".join(re.findall('\d+', follow_up_ticket['description'][number_pos:end_pos]))
+                            if len(number) == 11:   # remove 1 from +1 if present
+                                number = number[1:]
 
-                #         phone_number = "+1" + number
+                            phone_number = "+1" + number
 
-                #         phone_numbers[-1] = phone_number
+                            comp_lab = follow_up_ticket['custom_fields'][0]['value']
+
+                            if comp_lab:
+                                try:
+                                    phone_numbers[comp_lab].append(phone_number)
+
+                                except KeyError:
+                                    phone_numbers[comp_lab] = [phone_number]
+                            else:
+                                phone_numbers['Unknown Computer Lab'].append((follow_up_ticket['id'], phone_number))
         
-        # print phone numbers
+        for computer_lab in phone_numbers:
+            print(f'-----{computer_lab}-----\n')
+            if computer_lab != 'Unkown Computer Lab':
+                out_strings = phone_numbers[computer_lab]
+            else:
+                out_strings = [f"{obj[0]}: {obj[1]}" for obj in phone_numbers[computer_lab]]
+
+            print(", ".join(out_strings))
+            print(f"Total: {len(out_strings)}\n")
     
     def process_new_overdues(self, start, end, centers):
         time_now = datetime.now()
@@ -155,7 +183,7 @@ class RedmineConnection:
                                     end_pos = curr_ticket['issue']['description'].find('\n', number_pos)
 
                                     number = "".join(re.findall('\d+', curr_ticket['issue']['description'][number_pos:end_pos]))
-                                    if len(number) == 1:   # remove 1 from +1 if present
+                                    if len(number) == 11:   # remove 1 from +1 if present
                                         number = number[1:]
 
                                     phone_number = "+1" + number
@@ -163,6 +191,7 @@ class RedmineConnection:
                                     phone_numbers[-1] = phone_number
 
                     else:
+                        #### FIX so that doesn't include returned part of partially returned allocation in overdue list (subject)
                         issue_description = (f"{checkout['patron']['name']} - {checkout['patronPreferredEmail']}\n" \
                                                 f"Overdue {', '.join(checkout.split(' - ')[-1] for checkout in checkout['itemNames'])} - Contact Log\n" \
                                                 f"Item Due {timestamp_formatted.strftime('%m/%d/%Y')}\n\n" \
