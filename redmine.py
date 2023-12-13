@@ -80,13 +80,19 @@ class RedmineConnection:
                 else:
                     follow_up_ticket = self.session.get(url=self.host + f"/issues/{issue['id']}.json?include=journals", auth=(self.redmine_auth_key, '')).json()['issue']
 
-                    dos_pos = -1
                     time_ago = None
+
+                    dos_pos = follow_up_ticket['description'].lower().find('dos:')
+                    if dos_pos != -1:
+                        dos_end_pos = follow_up_ticket['description'].find('\n', dos_pos)
+
                     for journal in follow_up_ticket['journals']:
                         dos_pos = journal['notes'].lower().find('dos:')
                         if dos_pos != -1:
                             dos_end_pos = journal['notes'].find('\n', dos_pos)
-                            time_ago = datetime.strptime(journal['notes'][dos_pos:dos_end_pos].split()[1], '%m/%d/%Y') - datetime.now()
+                    
+                    if dos_pos != -1:
+                        time_ago = datetime.strptime(journal['notes'][dos_pos:dos_end_pos].split()[1], '%m/%d/%Y') - datetime.now()
                     
                     if time_ago and time_ago.days < 2:
                         self.session.put(url=f'https://redmine.library.wisc.edu/issues/{follow_up_ticket["id"]}.json',
