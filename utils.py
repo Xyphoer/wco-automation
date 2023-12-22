@@ -302,6 +302,22 @@ class utils:
         
         return results.final_consequences, end_time, allocation['checkoutCenter']
 
+    def get_checkout_emails(self, center, start_time, end_time):
+        emails = []
+        
+        checkouts = self.connection.get_new_overdues(center.lower()).json()['payload']['result']
+        start_formatted = datetime.strptime(start_time, '%m/%d/%Y')
+        end_formatted = datetime.strptime(end_time, '%m/%d/%Y')
+
+        for checkout in checkouts:
+            timestamp = checkout['scheduledEndTime'].split('.')[0]
+            timestamp_formatted = datetime.strptime(timestamp, '%Y-%m-%dT%H:%M:%S')
+
+            if timestamp_formatted > start_formatted and timestamp_formatted < end_formatted:
+                emails.append(checkout['patronPreferredEmail'])
+        
+        print(', '.join(emails))
+
 class Repercussions:
 
     def __init__(self, overdue_length: int):

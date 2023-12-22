@@ -10,6 +10,11 @@ class RedmineConnection:
         self.host = host
         self.redmine_auth_key = redmine_auth_key
 
+        self.project_id = 171 # hardcoded Tech Circ (change)
+        #self.status_new = 19 # hardcoded new status (change)
+        #self.tracker_support = 3 # hardcoded support tracker (change)
+        self.custom_field = {'id': 137, 'name': 'Computer Lab'}
+
         self.session = requests.Session()
 
         self.session.cookies.set('_redmine_session', redmine_session_cookie)
@@ -81,18 +86,25 @@ class RedmineConnection:
                     follow_up_ticket = self.session.get(url=self.host + f"/issues/{issue['id']}.json?include=journals", auth=(self.redmine_auth_key, '')).json()['issue']
 
                     time_ago = None
+                    content = follow_up_ticket['description'].lower()
 
-                    dos_pos = follow_up_ticket['description'].lower().find('dos:')
+                    # add a no send option 
+                    # if already texted but still <2 days don't update (need fix) - actually, think this is fine...
+
+                    dos_pos = content.find('dos on:')
                     if dos_pos != -1:
                         dos_end_pos = follow_up_ticket['description'].find('\n', dos_pos)
 
                     for journal in follow_up_ticket['journals']:
-                        dos_pos = journal['notes'].lower().find('dos:')
-                        if dos_pos != -1:
-                            dos_end_pos = journal['notes'].find('\n', dos_pos)
+                        if journal['notes']:    # all History counts, not just notes (i.e. can have empty note field, skip these)
+                            content = journal['notes'].lower()
+                            dos_pos = content.find('dos:')
+                            if dos_pos != -1:
+                                dos_end_pos = content.find('\n', dos_pos)
                     
                     if dos_pos != -1:
-                        time_ago = datetime.strptime(journal['notes'][dos_pos:dos_end_pos].split()[1], '%m/%d/%Y') - datetime.now()
+                        time_ago = datetime.strptime(content[dos_pos:dos_end_pos].split()[-1], '%m/%d/%Y') - datetime.now()
+                        #print(follow_up_ticket['id'], time_ago)
                     
                     if time_ago and time_ago.days < 2:
                         self.session.put(url=f'https://redmine.library.wisc.edu/issues/{follow_up_ticket["id"]}.json',
@@ -158,7 +170,9 @@ class RedmineConnection:
                         phone_number = "+1" + "".join(re.findall('\d+', checkout['note']))
                         phone_numbers.append(phone_number[0:12] if len(phone_number) > 12 else phone_number)
                     else:
-                        phone_numbers.append(f"{checkout['uniqueId']} - {checkout['patron']['name']} - No phone number found")
+                        phone_number = input(f"Phone Number for {checkout['uniqueId']} - {checkout['patron']['name']}: ")
+                        if not phone_number:
+                            phone_numbers.append(f"{checkout['uniqueId']} - {checkout['patron']['name']} - No phone number found")
 
                     # check for open tickets
                     existing_ticket = self.session.get(url = self.host + f"/search.json?q={checkout['uniqueId']}&scope=my_project", auth=(self.redmine_auth_key, '')).json()
@@ -199,16 +213,25 @@ class RedmineConnection:
                     else:
                         #### FIX so that doesn't include returned part of partially returned allocation in overdue list (subject) [use contents, see tmp.txt]
                         issue_description = (f"{checkout['patron']['name']} - {checkout['patronPreferredEmail']}\n" \
-                                                f"Overdue {', '.join(checkout.split(' - ')[-1] for checkout in checkout['itemNames'])} - Contact Log\n" \
                                                 f"Item Due {timestamp_formatted.strftime('%m/%d/%Y')}\n\n" \
                                                 f"{checkout['uniqueId']}\n\n" \
                                                 f"Patron Phone #: {phone_number}\n" \
                                                 f"Patron Name: {checkout['patron']['name']}\n\n" \
                                                 f"Day 7/Send to DoS ON: {time_dos.strftime('%m/%d/%Y')}\n" \
-                                                f"- Texted {time_now.strftime('%m/%d/%Y')}\n\n" \
-                                                "----------------------------\n\n")
+                                                f"- Texted {time_now.strftime('%m/%d/%Y')}\n\n")
 
-                        print(issue_description)
+                        new_ticket = self.session.post(url=f'https://redmine.library.wisc.edu/issues.json',
+                                        auth=(self.redmine_auth_key, ''),
+                                        json={'issue': {'project_id': self.project_id,
+                                                        'status_id': 14, # working on it
+                                                        'custom_fields': [{"value": location, "id": self.custom_field['id']}],
+                                                        'subject': f"Overdue {', '.join(checkout.split(' - ')[-1] for checkout in checkout['itemNames'])} - Contact Log\n",
+                                                        'description': issue_description}})
+                        
+                        print(f'Ticket #{new_ticket.json()["issue"]["id"]} for {checkout["patron"]["name"]} created.')
+                        
+
+                        
 
         
             phone_numbers.sort()

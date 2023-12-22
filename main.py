@@ -29,6 +29,10 @@ parser.add_argument('-ru', '--redmine_update', nargs='*',
                     'Outputs phone numbers for each location and redmine template for ticket creation.' \
                     'Format: start_date end_date centers_to_consider' \
                     'Example usage: main.py -ru mm/dd/yyyy mm/dd/yyyy center1 center2')
+parser.add_argument('-ce', '--checkout_emails', nargs=3,
+                    help = 'Gets a list of emails for patrons from open checkouts between the two dates for the specified center.' \
+                    'Format: start_date end_date center_to_consider' \
+                    'Example usage: main.py -ce mm/dd/yyyy mm/dd/yyyy center')
 
 args = parser.parse_args()
 
@@ -164,6 +168,13 @@ try:
 
         rm_connection.process_working_overdues(project_query_ext=project_query_ext)
         rm_connection.process_new_overdues(start=args.redmine_update[0], end=args.redmine_update[1], centers=args.redmine_update[2:])
+    
+    if args.checkout_emails:
+        print(f"Getting emails for open checkouts from {args.checkout_emails[0]} to {args.checkout_emails[1]} at center: {args.checkout_emails[2]}...\n")
+
+        utils = utils(wco_connection)
+
+        utils.get_checkout_emails(start_time=args.checkout_emails[0], end_time=args.checkout_emails[1], center=args.checkout_emails[2])
 
 finally:
      # always close the open connection before ending
