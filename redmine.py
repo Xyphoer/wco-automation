@@ -137,10 +137,11 @@ class RedmineConnection:
         
         for computer_lab in phone_numbers:
             print(f'-----{computer_lab}-----\n')
-            if computer_lab != 'Unkown Computer Lab':
+            if computer_lab != 'Unknown Computer Lab':
                 out_strings = phone_numbers[computer_lab]
             else:
                 out_strings = [f"{obj[0]}: {obj[1]}" for obj in phone_numbers[computer_lab]]
+                print(out_strings)
 
             print(", ".join(out_strings))
             print(f"Total: {len(out_strings)}\n")
@@ -171,6 +172,7 @@ class RedmineConnection:
                         phone_numbers.append(phone_number[0:12] if len(phone_number) > 12 else phone_number)
                     else:
                         phone_number = input(f"Phone Number for {checkout['uniqueId']} - {checkout['patron']['name']}: ")
+                        phone_numbers.append(phone_number[0:12] if len(phone_number) > 12 else phone_number)
                         if not phone_number:
                             phone_numbers.append(f"{checkout['uniqueId']} - {checkout['patron']['name']} - No phone number found")
 
