@@ -31,7 +31,7 @@ class RedmineConnection:
 
         for issue in response.json()['issues']:
             
-            if "overdue" in issue['subject'].lower() and "contact log" in issue['subject'].lower() and "dos" not in issue['subject'].lower():
+            if "overdue" in issue['subject'].lower() and "contact log" in issue['subject'].lower() and issue['status']['name'].lower() == 'working on it':
 
                 regex = re.compile("CK- *\d+")
                 checkouts = regex.findall(issue['description'])
