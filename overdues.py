@@ -10,16 +10,95 @@ class Overdues:
         self.utils = utilities
         self.db = db
     
-    ## can handle returned items. Need handler for placing holds and fines
-    def update(self, start_time: str, end_time: str) -> dict:
+    ## can handle returned items and holds. Need fines still
+    def update(self, start_time: str, end_time: str = '') -> dict:
+        self._process_current_overdues()
+        self._process_returned_overdues(start_time, end_time)
+        self._process_fines()
+        self._remove_holds()
+    
+    def get_patrons(self, oid: list = [], name: list = [], wiscard: list = []) -> list:
+        # get patrons from database
+        pass
+
+    def reduce_overdue_count(self, oid: int = None, name: str = None, wiscard: int = None, amount: int = 0) -> tuple:
+        # reduce a patron overdue item count by amount. Returnes a tuple of (before_count, after_count)
+        pass
+
+    def increase_overdue_count(self, oid: int = None, name: str = None, wiscard: int = None, amount: int = 0) -> tuple:
+        # incease a patron overdue item count by amount. Returnes a tuple of (before_count, after_count)
+        pass
+
+    # (Turn into place_invoice and have hold & fine?) place hold and update db. NOTE: This does not update overdue count, just the hold status.
+    def place_hold(self, oid: int, checkout_center, allocation = None, end = None, message = '', update_db = True):
+        account = self.connection.get_account(oid).json()
+        invoice = self.connection.create_invoice(account['payload']['defaultAccount'], account['session']['organization'], checkout_center, allocation=allocation).json()
+        _hold = self.connection.apply_invoice_hold(invoice['payload'], message)
+
+        if update_db:
+            hold_length = end - datetime.now() if end else 'NULL'
+
+            if end:
+                self.db.run("INSERT INTO " \
+                                "overdues (patron_oid, hold_status, hold_length, hold_remove_time)" \
+                            "VALUES " \
+                                f"({oid}, True, {hold_length}, {end})" \
+                            "ON CONFLICT (patron_oid) DO " \
+                                f"UPDATE SET hold_status = True, hold_length = {hold_length}, hold_remove_time = {end}")
+            else:
+                self.db.run("INSERT INTO " \
+                                "overdues (patron_oid, hold_status)" \
+                            "VALUES " \
+                                f"({oid}, True)" \
+                            "ON CONFLICT (patron_oid) DO " \
+                                f"UPDATE SET hold_status = True")
+        
+        return invoice['payload']
+
+    # remove a specific hold
+    def remove_hold(self, oid: int):
+        pass
+
+    def place_fee(self, invoice, items: tuple):
+        pass
+    
+    # get all current overdues and apply holds (if >1day or reserve) and update DB -- DONE: NEED TEST
+    def _process_current_overdues(self):
+        response = self.connection.get_current_overdue_allocations()
+
+        for allocation in response.json()['payload']['result']:
+
+            # TEMP BLOCKER -- NEED TEST
+            if allocation['patron']['oid'] != 14652305:
+                continue
+            else:
+                center = allocation['checkoutCenter']
+                reserve = False
+
+                for resource_type in allocation['allTypes']:
+                    reserve = True if 'reserve' in resource_type['path'].lower() or reserve else False
+                
+                if reserve:
+                    self.place_hold(allocation['patron']['oid'], center)
+                else:
+                    overdue_length = datetime.now() - datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+                    if overdue_length.days >= 1:
+                        self.place_hold(allocation['patron']['oid'], center)
+        
+        return
+
+    # get all returned overdues and resolve hold end date, fine, or fully create if needed. -- NOTE: Need fine implement & alloc with diff return times handler
+    def _process_returned_overdues(self, start_search_time: str, end_search_time: str = ''): #  -> dict
         # update db with new overdue items for patrons (Note: only count if the checkout is completed)
-        # returns dictionary of changes
-        start_time = datetime.strptime(start_time, '%m/%d/%Y')
-        end_time = datetime.strptime(end_time, '%m/%d/%Y')
+        # update step: returns dictionary of changes
+        start_search_time = datetime.strptime(start_search_time, '%m/%d/%Y')
+        end_search_time = datetime.strptime(end_search_time, '%m/%d/%Y') if end_search_time else datetime.now()
         insert_dict = {}
         insert_query = ''
 
-        response = self.connection.get_completed_overdue_allocations(start_time, end_time)
+        current_holds = self.db.all('SELECT patron_oid FROM overdues WHERE hold_status')
+
+        response = self.connection.get_completed_overdue_allocations(start_search_time, end_search_time)
 
         for allocation in response.json()['payload']['result']:
             
@@ -29,7 +108,7 @@ class Overdues:
             ### Set hold end time to start counting from once replacement fee is paid (if applicable)
 
             try:
-                insert_dict[allocation['patron']['oid']][0] += allocation['itemCount']
+                insert_dict[allocation['patron']['oid']][0] += allocation['itemCount']  ### UPDATE TO HANDLE PARTIAL RETURNS BETTER -- MAYBE ONLY DO FULL RETURNS? complex situation
                 insert_dict[allocation['patron']['oid']][1:] = ['True' if conseq['Hold'] else 'False',  # hold_status
                                                                 'True' if conseq['Fee'] else 'False',   # fee_status
                                                                 conseq['Hold'],                         # hold_length
@@ -45,9 +124,16 @@ class Overdues:
                                                             checkout_center]    # checkout center for hold
 
         for key, value in insert_dict.items():
-            if value[2] == 'True': value[4] = 'NULL'
+            invoice = False
 
-            #if value[1] == 'True': self.place_hold(key, end=value[4], checkout_center=value[5], message="")
+            if key not in current_holds:
+                if value[1] == 'True':
+                    # invoice = self.place_hold(key, checkout_center=value[5], update_db=False)
+                    pass
+
+            if value[2] == 'True':
+                value[4] = 'NULL'  # remove hold remove time if they have a fine. Must be paid first.
+                # self.place_fee(invoice, ) # NOTE: if hold already placed, need to get invoice a different way
 
             insert_query += f"({key}, {value[0]}, {value[1]}, {value[2]}, {value[3]}, {value[4]}),\n" 
         
@@ -74,27 +160,38 @@ class Overdues:
                                 "THEN overdues.hold_remove_time " \
                             "ELSE EXCLUDED.hold_remove_time " \
                         "END")
-    
-    def get_patrons(self, oid: list = [], name: list = [], wiscard: list = []) -> list:
-        # get patrons from database
+        
+        return
+
+    # check for those who have paid their fine, and resolve hold end date if they have
+    # NOTE: still open $0.00 holds count as 'Paid' not 'Pending' thus are not open. (Still can have hold). Staff can 'strike' charges when they are paid.
+    def _process_fines(self):
+        fined_patrons = self.db.all('SELECT patron_oid, hold_length FROM overdues WHERE fee_status')
+        db_update = []
+
+        for patron_oid, hold_length in fined_patrons:
+            result = self.connection.get_patron(patron_oid, ['openInvoices']).json()
+            open_invoices = result['payload']['openInvoices']
+
+            if not open_invoices:
+                # issues with 0 or more than 1 (best practice may be to store invoice oid as well in db)
+                invoice_oid = self.connection.find_invoices({'and': {'payee': result['payload'], 'isHold': True}}).json()['payload']['result'][0]['oid']
+                invoice = self.connection.get_invoice(invoice_oid, ['datePaid', 'isHold']).json()['payload']
+                # if not invoice['isHold']: # decide methodology (place_hold creates invoice... Seperate functions?)
+                date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
+                db_update.append((patron_oid, date_paid + timedelta(days=hold_length)))
+        
+        self.db.run(f"UPDATE overdues SET " \
+                        "hold_remove_time = batch.hold_remove_time" \
+                    f"FROM (values ({', '.join(db_update)})) as batch(patron_oid, hold_remove_time)"
+                    "WHERE overdues.patron_oid = batch.patron_oid")
+
+    # remove holds on patrons who have reached the designated time of removal.
+    def _remove_holds(self):
         pass
 
-    def reduce_overdue_count(self, oid: int = None, name: str = None, wiscard: int = None, amount: int = 0) -> tuple:
-        # reduce a patron overdue item count by amount. Returnes a tuple of (before_count, after_count)
+    def _update_db(self, patrons_oids, ):
         pass
-
-    def increase_overdue_count(self, oid: int = None, name: str = None, wiscard: int = None, amount: int = 0) -> tuple:
-        # incease a patron overdue item count by amount. Returnes a tuple of (before_count, after_count)
-        pass
-
-    def place_hold(self, oid: int, end, checkout_center, message):
-        account = self.connection.get_account(oid).json()
-        invoice = self.connection.create_invoice(account['payload']['defaultAccount'], account['session']['organization'], checkout_center).json()
-        hold = self.connection.apply_invoice_hold(invoice['payload'], message)
-
-        self.db.run(f"UPDATE overdues SET hold_status = True, hold_remove_time = '{end}' WHERE patron_oid = {oid}")
-
-    #def remove_hold(self)
 
 wco_host = ''
 wco_userid = ''
@@ -145,4 +242,6 @@ db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, cou
 wco_conn = Connection(wco_userid, wco_password, wco_host)
 oconn = Overdues(wco_conn, utils(wco_conn), db)
 
-oconn.update('11/15/2023', '11/21/2023')
+#oconn.update('11/15/2023', '11/16/2023')
+
+oconn.place_hold(14652305, wco_conn.centers['college'], message='foobar')
