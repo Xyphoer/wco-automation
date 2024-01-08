@@ -192,7 +192,13 @@ class Overdues:
 
     # remove holds on patrons who have reached the designated time of removal.
     def _remove_holds(self):
-        pass
+        now = datetime.now()
+
+        potential_holds = self.db.all('SELECT patron_oid, hold_remove_time, invoice_oid FROM overdues WHERE hold_status')
+
+        for patron_oid, hold_remove_time, invoice_oid in potential_holds:
+            if hold_remove_time < now:
+                self.remove_hold(invoice_oid)
 
     def _update_db(self, patrons_oids, ):
         pass
