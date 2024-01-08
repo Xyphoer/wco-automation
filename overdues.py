@@ -34,24 +34,25 @@ class Overdues:
         account = self.connection.get_account(oid).json()
         invoice = self.connection.create_invoice(account['payload']['defaultAccount'], account['session']['organization'], checkout_center, allocation=allocation).json()
         _hold = self.connection.apply_invoice_hold(invoice['payload'], message)
+        invoice_oid = invoice['payload']['oid']
 
         if update_db:
             hold_length = end - datetime.now() if end else 'NULL'
 
             if end:
                 self.db.run("INSERT INTO " \
-                                "overdues (patron_oid, hold_status, hold_length, hold_remove_time)" \
+                                "overdues (patron_oid, hold_status, hold_length, hold_remove_time, invoice_oid)" \
                             "VALUES " \
-                                f"({oid}, True, {hold_length}, {end})" \
+                                f"({oid}, True, {hold_length}, {end}, {invoice_oid})" \
                             "ON CONFLICT (patron_oid) DO " \
-                                f"UPDATE SET hold_status = True, hold_length = {hold_length}, hold_remove_time = {end}")
+                                f"UPDATE SET hold_status = True, hold_length = {hold_length}, hold_remove_time = {end}, invoice_oid = {invoice_oid}")
             else:
                 self.db.run("INSERT INTO " \
-                                "overdues (patron_oid, hold_status)" \
+                                "overdues (patron_oid, hold_status, invoice_oid)" \
                             "VALUES " \
-                                f"({oid}, True)" \
+                                f"({oid}, True, {invoice_oid})" \
                             "ON CONFLICT (patron_oid) DO " \
-                                f"UPDATE SET hold_status = True")
+                                f"UPDATE SET hold_status = True, invoice_oid = {invoice_oid}")
         
         return invoice['payload']
 
@@ -125,20 +126,22 @@ class Overdues:
 
         for key, value in insert_dict.items():
             invoice = False
+            invoice_oid = False
 
             if key not in current_holds:
                 if value[1] == 'True':
-                    # invoice = self.place_hold(key, checkout_center=value[5], update_db=False)
+                    invoice = self.place_hold(key, checkout_center=value[5], update_db=False)
+                    invoice_oid = invoice['oid']
                     pass
 
             if value[2] == 'True':
                 value[4] = 'NULL'  # remove hold remove time if they have a fine. Must be paid first.
                 # self.place_fee(invoice, ) # NOTE: if hold already placed, need to get invoice a different way
 
-            insert_query += f"({key}, {value[0]}, {value[1]}, {value[2]}, {value[3]}, {value[4]}),\n" 
+            insert_query += f"({key}, {value[0]}, {value[1]}, {value[2]}, {value[3]}, {value[4]}, {invoice_oid if invoice_oid else 'NULL'}),\n" 
         
         self.db.run("INSERT INTO " \
-                        "overdues (patron_oid, count, hold_status, fee_status, hold_length, hold_remove_time) " \
+                        f"overdues (patron_oid, count, hold_status, fee_status, hold_length, hold_remove_time, invoice_oid) " \
                     "VALUES " \
                         f"{insert_query.strip()[:-1]}" \
                     "ON CONFLICT (patron_oid) DO " \
@@ -159,6 +162,13 @@ class Overdues:
                             "WHEN overdues.hold_remove_time IS NOT NULL " \
                                 "THEN overdues.hold_remove_time " \
                             "ELSE EXCLUDED.hold_remove_time " \
+                        "END" \
+                        "invoice_oid = CASE " \
+                            "WHEN EXCLUDED.invoice_oid IS NOT NULL " \
+                                "THEN EXCLUDED.invoice_oid " \
+                            "WHEN overdues.invoice_oid IS NOT NULL " \
+                                "THEN overdues.invoice_oid " \
+                            "ELSE NULL " \
                         "END")
         
         return
@@ -166,20 +176,14 @@ class Overdues:
     # check for those who have paid their fine, and resolve hold end date if they have
     # NOTE: still open $0.00 holds count as 'Paid' not 'Pending' thus are not open. (Still can have hold). Staff can 'strike' charges when they are paid.
     def _process_fines(self):
-        fined_patrons = self.db.all('SELECT patron_oid, hold_length FROM overdues WHERE fee_status')
+        fined_patrons = self.db.all('SELECT patron_oid, hold_length, invoice_oid FROM overdues WHERE fee_status')
         db_update = []
 
-        for patron_oid, hold_length in fined_patrons:
-            result = self.connection.get_patron(patron_oid, ['openInvoices']).json()
-            open_invoices = result['payload']['openInvoices']
-
-            if not open_invoices:
-                # issues with 0 or more than 1 (best practice may be to store invoice oid as well in db)
-                invoice_oid = self.connection.find_invoices({'and': {'payee': result['payload'], 'isHold': True}}).json()['payload']['result'][0]['oid']
-                invoice = self.connection.get_invoice(invoice_oid, ['datePaid', 'isHold']).json()['payload']
-                # if not invoice['isHold']: # decide methodology (place_hold creates invoice... Seperate functions?)
-                date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
-                db_update.append((patron_oid, date_paid + timedelta(days=hold_length)))
+        for patron_oid, hold_length, invoice_oid in fined_patrons:
+            invoice = self.connection.get_invoice(invoice_oid, ['datePaid', 'isHold']).json()['payload']
+            date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
+            db_update.append((patron_oid, date_paid + timedelta(days=hold_length)))   
+            # if not invoice['isHold']: # decide methodology (place_hold creates invoice... Seperate functions?)
         
         self.db.run(f"UPDATE overdues SET " \
                         "hold_remove_time = batch.hold_remove_time" \
@@ -237,7 +241,7 @@ except OSError as e:
 
 db = Postgres(f"dbname=postgres user=postgres password={postgres_pass}")
 
-db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, hold_length INTEGER, hold_remove_time TIMESTAMP)")
+db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, hold_length INTEGER, hold_remove_time TIMESTAMP, invoice_oid INTEGER)")
 
 wco_conn = Connection(wco_userid, wco_password, wco_host)
 oconn = Overdues(wco_conn, utils(wco_conn), db)
