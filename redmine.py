@@ -171,7 +171,7 @@ class RedmineConnection:
                         phone_number = "+1" + "".join(re.findall('\d+', checkout['note']))
                         phone_numbers.append(phone_number[0:12] if len(phone_number) > 12 else phone_number)
                     else:
-                        phone_number = input(f"Phone Number for {checkout['uniqueId']} - {checkout['patron']['name']}: ")
+                        phone_number = "+1" + "".join(re.findall('\d+', input(f"Phone Number for {checkout['uniqueId']} - {checkout['patron']['name']}: ")))
                         phone_numbers.append(phone_number[0:12] if len(phone_number) > 12 else phone_number)
                         if not phone_number:
                             phone_numbers.append(f"{checkout['uniqueId']} - {checkout['patron']['name']} - No phone number found")
@@ -226,9 +226,11 @@ class RedmineConnection:
                                         auth=(self.redmine_auth_key, ''),
                                         json={'issue': {'project_id': self.project_id,
                                                         'status_id': 14, # working on it
-                                                        'custom_fields': [{"value": location, "id": self.custom_field['id']}],
+                                                        'custom_fields': [{"value": location.title(), "id": self.custom_field['id']}],
                                                         'subject': f"Overdue {', '.join(checkout.split(' - ')[-1] for checkout in checkout['itemNames'])} - Contact Log\n",
                                                         'description': issue_description}})
+                        
+                        #print(new_ticket.json())
                         
                         print(f'Ticket #{new_ticket.json()["issue"]["id"]} for {checkout["patron"]["name"]} created.')
                         
