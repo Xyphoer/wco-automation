@@ -29,7 +29,7 @@ class Overdues:
         # incease a patron overdue item count by amount. Returnes a tuple of (before_count, after_count)
         pass
 
-    # (Turn into place_invoice and have hold & fine?) place hold and update db. NOTE: This does not update overdue count, just the hold status.
+    # (Turn into place_invoice and have hold & fine?) place hold and update db. NOTE: Done -- This does not update overdue count, just the hold status.
     def place_hold(self, oid: int, checkout_center, allocation = None, end = None, message = '', update_db = True):
         account = self.connection.get_account(oid).json()
         invoice = self.connection.create_invoice(account['payload']['defaultAccount'], account['session']['organization'], checkout_center, allocation=allocation).json()
@@ -173,7 +173,7 @@ class Overdues:
         
         return
 
-    # check for those who have paid their fine, and resolve hold end date if they have
+    # check for those who have paid their fine, and resolve hold end date if they have NOTE: Done
     # NOTE: still open $0.00 holds count as 'Paid' not 'Pending' thus are not open. (Still can have hold). Staff can 'strike' charges when they are paid.
     def _process_fines(self):
         fined_patrons = self.db.all('SELECT patron_oid, hold_length, invoice_oid FROM overdues WHERE fee_status')
@@ -183,22 +183,29 @@ class Overdues:
             invoice = self.connection.get_invoice(invoice_oid, ['datePaid', 'isHold']).json()['payload']
             date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
             db_update.append((patron_oid, date_paid + timedelta(days=hold_length)))   
-            # if not invoice['isHold']: # decide methodology (place_hold creates invoice... Seperate functions?)
+            # if not invoice['isHold']: # decide methodology (place_hold creates invoice... Seperate functions? or just hold stuff here) -- Note: Should not come into play, backup for if staff removes hold. Update path.
         
         self.db.run(f"UPDATE overdues SET " \
-                        "hold_remove_time = batch.hold_remove_time" \
-                    f"FROM (values ({', '.join(db_update)})) as batch(patron_oid, hold_remove_time)"
+                        "hold_remove_time = batch.hold_remove_time " \
+                    f"FROM (VALUES ({', '.join(db_update)})) AS batch(patron_oid, hold_remove_time) " \
                     "WHERE overdues.patron_oid = batch.patron_oid")
 
     # remove holds on patrons who have reached the designated time of removal.
     def _remove_holds(self):
         now = datetime.now()
+        holds_removed = []
 
         potential_holds = self.db.all('SELECT patron_oid, hold_remove_time, invoice_oid FROM overdues WHERE hold_status')
 
         for patron_oid, hold_remove_time, invoice_oid in potential_holds:
             if hold_remove_time < now:
                 self.remove_hold(invoice_oid)
+                holds_removed.append(f"({patron_oid})")
+        
+        self.db.run(f"UPDATE overdues SET " \
+                    f"hold_status = {False}, hold_remove_time = NULL::timestamp, invoice_oid = NULL " \
+                    f"FROM (VALUES ({', '.join(holds_removed)})) AS batch(patron_oid) " \
+                     "WHERE overdues.patron_oid = batch.patron_oid")
 
     def _update_db(self, patrons_oids, ):
         pass
