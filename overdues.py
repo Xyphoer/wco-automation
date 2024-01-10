@@ -57,8 +57,11 @@ class Overdues:
         return invoice['payload']
 
     # remove a specific hold
-    def remove_hold(self, oid: int):
-        pass
+    def remove_hold(self, invoice_oid: int):
+        invoice = self.connection.get_invoice(invoice_oid).json()['payload']
+        invoice = self.connection.remove_invoice_hold(invoice)
+        invoice = self.connection.waive_invoice(invoice)
+        return invoice
 
     def place_fee(self, invoice, items: tuple):
         pass
@@ -190,7 +193,7 @@ class Overdues:
                     f"FROM (VALUES ({', '.join(db_update)})) AS batch(patron_oid, hold_remove_time) " \
                     "WHERE overdues.patron_oid = batch.patron_oid")
 
-    # remove holds on patrons who have reached the designated time of removal.
+    # remove holds on patrons who have reached the designated time of removal. DONE
     def _remove_holds(self):
         now = datetime.now()
         holds_removed = []

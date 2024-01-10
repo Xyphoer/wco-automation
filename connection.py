@@ -240,9 +240,21 @@ class Connection:
                                     "organization": organization,
                                     "allocation": allocation,
                                     "checkoutCenter": center})
+    
+    def waive_invoice(self, invoice, comment: str = '') -> requests.Response:
+        return requests.post(url = self.host + "/rest/invoice/waive",
+                            headers = {"Authorization": "Bearer " + self.session_token},
+                            json = {"invoices": invoice,
+                                    "comment": comment})
 
-    def apply_invoice_hold(self, invoice, comment: str):
+    def apply_invoice_hold(self, invoice, comment: str = ''):
         return requests.post(url = self.host + "/rest/invoice/applyHold",
+                             headers = {"Authorization": "Bearer " + self.session_token},
+                             json = {"invoice": invoice,
+                                     "comment": comment})
+    
+    def remove_invoice_hold(self, invoice, comment: str = ''):
+        return requests.post(url = self.host + "/rest/invoice/removeHold",
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"invoice": invoice,
                                      "comment": comment})
