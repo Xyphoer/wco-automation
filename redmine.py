@@ -178,41 +178,45 @@ class RedmineConnection:
 
                     # check for open tickets
                     existing_ticket = self.session.get(url = self.host + f"/search.json?q={checkout['uniqueId']}&scope=my_project", auth=(self.redmine_auth_key, '')).json()
+                    found = False
 
                     if existing_ticket['total_count']:
-                        if "overdue" in existing_ticket['results'][0]['title'].lower() and "contact log" in existing_ticket['results'][0]['title'].lower():
-                            update_text = f"Due: {timestamp_formatted.strftime('%m/%d/%Y')}\n" \
-                                        f"DoS: {time_dos.strftime('%m/%d/%Y')}\n" \
-                                        f"Texted {time_now.strftime('%m/%d/%Y')}"
+                        for result in existing_ticket['results']:
+                            if "overdue" in result['title'].lower() and "contact log" in result['title'].lower():
+                                update_text = f"Due: {timestamp_formatted.strftime('%m/%d/%Y')}\n" \
+                                            f"DoS: {time_dos.strftime('%m/%d/%Y')}\n" \
+                                            f"Texted {time_now.strftime('%m/%d/%Y')}"
 
-                            # must always go from resolved to new to working on it (redmine doesn't support going from resolved to working on it)
-                            self.session.put(url=f'https://redmine.library.wisc.edu/issues/{existing_ticket["results"][0]["id"]}.json',
-                                            auth=(self.redmine_auth_key, ''),
-                                            json={'issue': {'status_id': 19, 'notes': update_text}})
-                            self.session.put(url=f'https://redmine.library.wisc.edu/issues/{existing_ticket["results"][0]["id"]}.json',
-                                            auth=(self.redmine_auth_key, ''),
-                                            json={'issue': {'status_id': 14}})
-                            
-                            print(f'Ticket #{existing_ticket["results"][0]["id"]} updated with:\n{update_text}\n')
-                            
-                            if not phone_number:
-                                curr_ticket = self.session.get(url=f'https://redmine.library.wisc.edu/issues/{existing_ticket["results"][0]["id"]}.json',
-                                                auth=(self.redmine_auth_key, '')).json()
+                                # must always go from resolved to new to working on it (redmine doesn't support going from resolved to working on it)
+                                self.session.put(url=f'https://redmine.library.wisc.edu/issues/{result["id"]}.json',
+                                                auth=(self.redmine_auth_key, ''),
+                                                json={'issue': {'status_id': 19, 'notes': update_text}})
+                                self.session.put(url=f'https://redmine.library.wisc.edu/issues/{result["id"]}.json',
+                                                auth=(self.redmine_auth_key, ''),
+                                                json={'issue': {'status_id': 14}})
                                 
-                                number_pos = curr_ticket['issue']['description'].find('Phone #:')
+                                print(f'Ticket #{result["id"]} updated with:\n{update_text}\n')
+                                
+                                if not phone_number:
+                                    curr_ticket = self.session.get(url=f'https://redmine.library.wisc.edu/issues/{result["id"]}.json',
+                                                    auth=(self.redmine_auth_key, '')).json()
+                                    
+                                    number_pos = curr_ticket['issue']['description'].find('Phone #:')
 
-                                if number_pos != -1:
-                                    end_pos = curr_ticket['issue']['description'].find('\n', number_pos)
+                                    if number_pos != -1:
+                                        end_pos = curr_ticket['issue']['description'].find('\n', number_pos)
 
-                                    number = "".join(re.findall('\d+', curr_ticket['issue']['description'][number_pos:end_pos]))
-                                    if len(number) == 11:   # remove 1 from +1 if present
-                                        number = number[1:]
+                                        number = "".join(re.findall('\d+', curr_ticket['issue']['description'][number_pos:end_pos]))
+                                        if len(number) == 11:   # remove 1 from +1 if present
+                                            number = number[1:]
 
-                                    phone_number = "+1" + number
+                                        phone_number = "+1" + number
 
-                                    phone_numbers[-1] = phone_number
+                                        phone_numbers[-1] = phone_number
+                                found = True
+                                break
 
-                    else:
+                    elif not found:
                         #### FIX so that doesn't include returned part of partially returned allocation in overdue list (subject) [use contents, see tmp.txt]
                         issue_description = (f"{checkout['patron']['name']} - {checkout['patronPreferredEmail']}\n" \
                                                 f"Item Due {timestamp_formatted.strftime('%m/%d/%Y')}\n\n" \
