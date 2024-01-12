@@ -1,7 +1,7 @@
 from connection import Connection
 from postgres import Postgres
 from datetime import datetime, timedelta
-from utils import utils
+from utils import utils, Repercussions
 
 class Overdues:
 
@@ -77,17 +77,17 @@ class Overdues:
                 continue
             else:
                 center = allocation['checkoutCenter']
-                reserve = False
+                overdue_length = datetime.now() - datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
 
-                for resource_type in allocation['allTypes']:
-                    reserve = True if 'reserve' in resource_type['path'].lower() or reserve else False
+                consequences = Repercussions(overdue_length, allocation['allTypes']).update()
                 
-                if reserve:
-                    self.place_hold(allocation['patron']['oid'], center)
-                else:
-                    overdue_length = datetime.now() - datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
-                    if overdue_length.days >= 1:
-                        self.place_hold(allocation['patron']['oid'], center)
+                if consequences['Hold']:
+                    invoice = self.place_hold(allocation['patron']['oid'], center)
+                    if consequences['Fee']:
+                        self.place_fee(invoice['oid'], ())
+                        if consequences['Registrar Hold']:
+                            person = self.connection.get_patron(allocation['patron']['oid'], ['patronBarcode']).json()['payload']
+                            print(f'Registrar Hold needed for:{person['name']} - ({person['patronBarcode']})')
         
         return
 

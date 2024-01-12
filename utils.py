@@ -286,19 +286,13 @@ class utils:
         return results
     
     def get_overdue_consequence(self, allocation) -> (dict, datetime, dict):
-        type_buckets = []
-        reserve = False
-        for resource_type in allocation['allTypes']:
-            type_buckets.append('Accessories' if 'accessories' in resource_type['path'].lower() else 'Non Accessory')
-            reserve = True if 'reserve' in resource_type['path'].lower() or reserve else False
-        
         end_time = datetime.strptime(allocation['realEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
 
         overdue_length = end_time - datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
 
-        results = Repercussions(overdue_length.days)
+        results = Repercussions(overdue_length.days, allocation['allTypes'])
 
-        results.update(type_buckets)
+        results.update()
         
         return results.final_consequences, end_time, allocation['checkoutCenter']
 
@@ -320,7 +314,7 @@ class utils:
 
 class Repercussions:
 
-    def __init__(self, overdue_length: int):
+    def __init__(self, overdue_length: int, alloc_types):
         self.resource_type_consequence_mapping = {
             'Accessories': {
                 # Up to 1 day
@@ -407,20 +401,38 @@ class Repercussions:
             'Registrar Hold': False
         }
         self.upper_limits = (0, 1, 10, 20)
-        self.overdue_length = self.ceil(overdue_length)
+        self.overdue_length = self._ceil(overdue_length)
+        self.alloc_types = alloc_types
 
-    def get(self, idx):
+    def _get(self, idx):
         return self.resource_type_consequence_mapping[idx][self.overdue_length]
     
-    def ceil(self, idx):
+    def _ceil(self, idx):
         out = 0
         for limit in self.upper_limits:
             if idx > limit:
                 out = limit
         return out
     
-    def update(self, buckets):
+    def _get_buckets(self):
+        type_buckets = []
+
+        for resource_type in self.alloc_types:
+            if 'reserve' in resource_type['path'].lower():
+                type_buckets.append('Reserve')
+            elif 'accessories' in resource_type['path'].lower():
+                type_buckets.append('Accessories')
+            else:
+                type_buckets.append('Non Accessory')
+        
+        return type_buckets
+    
+    def update(self):
+        buckets = self._get_buckets()
+
         for bucket in buckets:
-            self.final_consequences['Hold'] = max(self.final_consequences['Hold'], self.get(bucket)['Hold'])
-            self.final_consequences['Fee'] = True if self.get(bucket)['Fee'] or self.final_consequences['Fee'] else False
-            self.final_consequences['Registrar Hold'] = True if self.get(bucket)['Registrar Hold'] or self.final_consequences['Registrar Hold'] else False
+            self.final_consequences['Hold'] = max(self.final_consequences['Hold'], self._get(bucket)['Hold'])
+            self.final_consequences['Fee'] = True if self._get(bucket)['Fee'] or self.final_consequences['Fee'] else False
+            self.final_consequences['Registrar Hold'] = True if self._get(bucket)['Registrar Hold'] or self.final_consequences['Registrar Hold'] else False
+        
+        return self.final_consequences
