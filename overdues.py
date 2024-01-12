@@ -88,7 +88,7 @@ class Overdues:
                         if consequences['Registrar Hold']:
                             person = self.connection.get_patron(allocation['patron']['oid'], ['patronBarcode']).json()['payload']
                             print(f'Registrar Hold needed for:{person['name']} - ({person['patronBarcode']})')
-        
+                # update DB
         return
 
     # get all returned overdues and resolve hold end date, fine, or fully create if needed. -- NOTE: Need fine implement & alloc with diff return times handler
@@ -137,6 +137,7 @@ class Overdues:
                     invoice_oid = invoice['oid']
                     pass
 
+            ### Fees and Registrar holds applied while overdue. remove on return (here)
             if value[2] == 'True':
                 value[4] = 'NULL'  # remove hold remove time if they have a fine. Must be paid first.
                 # self.place_fee(invoice, ) # NOTE: if hold already placed, need to get invoice a different way
