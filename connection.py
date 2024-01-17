@@ -194,7 +194,7 @@ class Connection:
         return requests.post(url = self.host + "/rest/allocation/search",
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"query": {"and": {"latestScheduledEnd": latest_scheduled_end, 'state': 'CHECKOUT'}},
-                                     "properties": ["oid", "patron", "itemCount", "allTypes", "scheduledEndTime", "realEndTime", "checkoutCenter"]})
+                                     "properties": ["oid", "patron", "itemCount", "allTypes", "scheduledEndTime", "realEndTime", "checkoutCenter", "aggregateValueOut"]})
     
     #####
     # Name: get_open_invoices

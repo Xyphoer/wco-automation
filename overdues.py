@@ -63,12 +63,27 @@ class Overdues:
         invoice = self.connection.waive_invoice(invoice)
         return invoice
 
-    def place_fee(self, invoice, items: tuple):
-        pass
+    def place_fee(self, invoice_oid, cost: int):
+        if cost:
+            charge = cost/100
+        else:
+            charge = 50
+
+        invoice = self.connection.get_invoice(invoice_oid)
+        invoice = self.connection.add_charge(invoice, amount=charge, subtype="Loss")
+
+        self.db.run("UPDATE overdues " \
+                    f"SET fee_status = {True} " \
+                    f"WHERE invoice_oid = {invoice_oid}")
+
+        return invoice
     
     # get all current overdues and apply holds (if >1day or reserve) and update DB -- DONE: NEED TEST
     def _process_current_overdues(self):
         response = self.connection.get_current_overdue_allocations()
+
+        current_holds = self.db.all('SELECT patron_oid FROM overdues WHERE hold_status')
+        current_fines = self.db.all('SELECT patron_oid FROM overdues WHERE fee_status')
 
         for allocation in response.json()['payload']['result']:
 
@@ -77,18 +92,22 @@ class Overdues:
                 continue
             else:
                 center = allocation['checkoutCenter']
+                patron_oid = allocation['patron']['oid']
                 overdue_length = datetime.now() - datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
 
                 consequences = Repercussions(overdue_length, allocation['allTypes']).update()
                 
                 if consequences['Hold']:
-                    invoice = self.place_hold(allocation['patron']['oid'], center)
+                    if patron_oid not in current_holds:
+                        invoice_oid = self.place_hold(patron_oid, center)['oid']
+                    else:
+                        invoice_oid = self.db.one(f'SELECT invoice_oid FROM overdues WHERE patron_oid={patron_oid}')
                     if consequences['Fee']:
-                        self.place_fee(invoice['oid'], ())
+                        if patron_oid not in current_fines:
+                            self.place_fee(invoice_oid, allocation['aggregateValueOut'])
                         if consequences['Registrar Hold']:
-                            person = self.connection.get_patron(allocation['patron']['oid'], ['patronBarcode']).json()['payload']
-                            print(f'Registrar Hold needed for:{person['name']} - ({person['patronBarcode']})')
-                # update DB
+                            person = self.connection.get_patron(patron_oid, ['patronBarcode']).json()['payload']
+                            print(f'Registrar Hold needed for:{person["name"]} - ({person["patronBarcode"]})')
         return
 
     # get all returned overdues and resolve hold end date, fine, or fully create if needed. -- NOTE: Need fine implement & alloc with diff return times handler
