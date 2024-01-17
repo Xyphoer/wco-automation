@@ -226,6 +226,25 @@ class Connection:
                                 headers = {"Authorization": "Bearer " + self.session_token},
                                 json = {"oid": invoice_oid})
     
+    def get_invoice_lines(self, invoice):
+        return requests.post(url = self.host + "/rest/invoice/search",
+                                headers = {"Authorization": "Bearer " + self.session_token},
+                                json = {"query": invoice})
+    
+    def strike_invoice_line(self, invoice, line, comment = ""):
+        return requests.post(url = self.host + "/rest/invoice/strikeInvoiceLine",
+                                headers = {"Authorization": "Bearer " + self.session_token},
+                                json = {"invoice": invoice,
+                                        "line": line,
+                                        "comment": comment})
+    
+    def unstrike_invoice_line(self, invoice, line, comment = ""):
+        return requests.post(url = self.host + "/rest/invoice/unstrikeInvoiceLine",
+                                headers = {"Authorization": "Bearer " + self.session_token},
+                                json = {"invoice": invoice,
+                                        "line": line,
+                                        "comment": comment})
+    
     #####
     # Name: create_invoice
     # Inputs: account, organization, center

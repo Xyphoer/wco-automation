@@ -64,13 +64,9 @@ class Overdues:
         return invoice
 
     def place_fee(self, invoice_oid, cost: int):
-        if cost:
-            charge = cost/100
-        else:
-            charge = 50
 
         invoice = self.connection.get_invoice(invoice_oid)
-        invoice = self.connection.add_charge(invoice, amount=charge, subtype="Loss")
+        self.connection.add_charge(invoice, amount=cost/100, subtype="Loss")
 
         self.db.run("UPDATE overdues " \
                     f"SET fee_status = {True} " \
@@ -120,6 +116,7 @@ class Overdues:
         insert_query = ''
 
         current_holds = self.db.all('SELECT patron_oid FROM overdues WHERE hold_status')
+        current_fines = self.db.all('SELECT patron_oid, invoice_oid FROM overdues WHERE fee_status')
 
         response = self.connection.get_completed_overdue_allocations(start_search_time, end_search_time)
 
@@ -130,10 +127,21 @@ class Overdues:
 
             ### Set hold end time to start counting from once replacement fee is paid (if applicable)
 
+            # If they have a fine, remove it as they returned the item
+            for entry in current_fines:
+                if allocation['patron']['oid'] in entry[0]:
+                    invoice = self.connection.get_invoice(entry[1]).json()['payload']
+                    invoice_lines = self.connection.get_invoice_lines(invoice).json()['payload']['result']
+                    for invoice_line in invoice_lines:
+                        self.connection.strike_invoice_line(invoice, invoice_line)
+                    if conseq['Registrar Hold']:
+                        name = self.connection.get_patron(allocation['patron']['oid'], ['name']).json()['payload']['name']
+                        print(f"Items returned, registrar hold can be removed for oid: {allocation['patron']['oid']} -- {name}")
+
             try:
                 insert_dict[allocation['patron']['oid']][0] += allocation['itemCount']  ### UPDATE TO HANDLE PARTIAL RETURNS BETTER -- MAYBE ONLY DO FULL RETURNS? complex situation
                 insert_dict[allocation['patron']['oid']][1:] = ['True' if conseq['Hold'] else 'False',  # hold_status
-                                                                'True' if conseq['Fee'] else 'False',   # fee_status
+                                                                'False',                                # fee_status ALWAYS false for returned items
                                                                 conseq['Hold'],                         # hold_length
                                                                 f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time
                                                                 checkout_center]    # checkout center for hold
@@ -141,7 +149,7 @@ class Overdues:
             except KeyError as e:
                 insert_dict[allocation['patron']['oid']] = [allocation['itemCount'],
                                                             'True' if conseq['Hold'] else 'False',  # hold_status
-                                                            'True' if conseq['Fee'] else 'False',   # fee_status
+                                                            'False',                                # fee_status ALWAYS false for returned items
                                                             conseq['Hold'],                         # hold_length
                                                             f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time
                                                             checkout_center]    # checkout center for hold
@@ -196,7 +204,7 @@ class Overdues:
         
         return
 
-    # check for those who have paid their fine, and resolve hold end date if they have NOTE: Done
+    # check for those who have paid their fine, and resolve hold end date if they have NOTE: Done   ALSO: Process returned checkouts
     # NOTE: still open $0.00 holds count as 'Paid' not 'Pending' thus are not open. (Still can have hold). Staff can 'strike' charges when they are paid.
     def _process_fines(self):
         fined_patrons = self.db.all('SELECT patron_oid, hold_length, invoice_oid FROM overdues WHERE fee_status')
