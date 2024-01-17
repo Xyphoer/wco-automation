@@ -212,14 +212,16 @@ class Overdues:
 
         for patron_oid, hold_length, invoice_oid in fined_patrons:
             invoice = self.connection.get_invoice(invoice_oid, ['datePaid', 'isHold']).json()['payload']
-            date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
-            db_update.append((patron_oid, date_paid + timedelta(days=hold_length)))   
+            if invoice['datePaid']:
+                date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
+                db_update.append((patron_oid, date_paid + timedelta(days=hold_length)))   
             # if not invoice['isHold']: # decide methodology (place_hold creates invoice... Seperate functions? or just hold stuff here) -- Note: Should not come into play, backup for if staff removes hold. Update path.
         
-        self.db.run(f"UPDATE overdues SET " \
-                        "hold_remove_time = batch.hold_remove_time " \
-                    f"FROM (VALUES ({', '.join(db_update)})) AS batch(patron_oid, hold_remove_time) " \
-                    "WHERE overdues.patron_oid = batch.patron_oid")
+        if db_update:
+            self.db.run(f"UPDATE overdues SET " \
+                            "hold_remove_time = batch.hold_remove_time " \
+                        f"FROM (VALUES ({', '.join(db_update)})) AS batch(patron_oid, hold_remove_time) " \
+                        "WHERE overdues.patron_oid = batch.patron_oid")
 
     # remove holds on patrons who have reached the designated time of removal. DONE
     def _remove_holds(self):
