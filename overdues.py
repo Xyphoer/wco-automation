@@ -204,7 +204,7 @@ class Overdues:
         
         return
 
-    # check for those who have paid their fine, and resolve hold end date if they have NOTE: Done   ALSO: Process returned checkouts
+    # check for those who have paid their fine, and resolve hold end date if they have NOTE: Done   ALSO: return and delete (paying fine equates to lost) NOTE: Done, UPGRADE PATH
     # NOTE: still open $0.00 holds count as 'Paid' not 'Pending' thus are not open. (Still can have hold). Staff can 'strike' charges when they are paid.
     def _process_fines(self):
         fined_patrons = self.db.all('SELECT patron_oid, hold_length, invoice_oid FROM overdues WHERE fee_status')
@@ -213,6 +213,10 @@ class Overdues:
         for patron_oid, hold_length, invoice_oid in fined_patrons:
             invoice = self.connection.get_invoice(invoice_oid, ['datePaid', 'isHold']).json()['payload']
             if invoice['datePaid']:
+
+                name = self.connection.get_patron(patron_oid, ['name']).json()['payload']['name']
+                print(f"Patron oid: {patron_oid} -- paid fine -- {name} -- Return & Delete item")
+
                 date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
                 db_update.append((patron_oid, date_paid + timedelta(days=hold_length)))   
             # if not invoice['isHold']: # decide methodology (place_hold creates invoice... Seperate functions? or just hold stuff here) -- Note: Should not come into play, backup for if staff removes hold. Update path.
