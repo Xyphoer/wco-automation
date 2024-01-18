@@ -97,7 +97,8 @@ class Overdues:
                     scheduled_end = policy_start_date
                 overdue_length = datetime.now() - scheduled_end
 
-                consequences = Repercussions(overdue_length, allocation['allTypes']).update()
+                allocation_types = [item['rtype'] for item in allocation['items'] if item['action'].lower() == 'checkout']
+                consequences = Repercussions(overdue_length, allocation_types).update()
                 
                 if consequences['Hold']:
                     if patron_oid not in current_holds:
@@ -144,8 +145,16 @@ class Overdues:
                         name = self.connection.get_patron(allocation['patron']['oid'], ['name']).json()['payload']['name']
                         print(f"Items returned, registrar hold can be removed for oid: {allocation['patron']['oid']} -- {name}")
 
+            # handle partial returns before due date
+            item_count = 0
+            for item in allocation['items']:
+                item_returned = datetime.strptime(item['realReturnTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+                allocation_due = datetime.strptime(item['returnTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+                if item_returned > allocation_due:
+                    item_count += 1
+
             try:
-                insert_dict[allocation['patron']['oid']][0] += allocation['itemCount']  ### UPDATE TO HANDLE PARTIAL RETURNS BETTER -- MAYBE ONLY DO FULL RETURNS? complex situation
+                insert_dict[allocation['patron']['oid']][0] += item_count
                 insert_dict[allocation['patron']['oid']][1:] = ['True' if conseq['Hold'] else 'False',  # hold_status
                                                                 'False',                                # fee_status ALWAYS false for returned items
                                                                 conseq['Hold'],                         # hold_length
@@ -153,7 +162,7 @@ class Overdues:
                                                                 checkout_center]    # checkout center for hold
 
             except KeyError as e:
-                insert_dict[allocation['patron']['oid']] = [allocation['itemCount'],
+                insert_dict[allocation['patron']['oid']] = [item_count,
                                                             'True' if conseq['Hold'] else 'False',  # hold_status
                                                             'False',                                # fee_status ALWAYS false for returned items
                                                             conseq['Hold'],                         # hold_length

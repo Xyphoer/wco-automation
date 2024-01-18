@@ -295,7 +295,9 @@ class utils:
 
         overdue_length = end_time - scheduled_end
 
-        results = Repercussions(overdue_length.days, allocation['allTypes'])
+        allocation_types = [item['rtype'] for item in allocation['items'] if item['action'].lower() == 'checkout']
+
+        results = Repercussions(overdue_length.days, allocation_types)
 
         results.update()
         
