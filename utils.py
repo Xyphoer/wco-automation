@@ -286,22 +286,31 @@ class utils:
         return results
     
     def get_overdue_consequence(self, allocation) -> (dict, datetime, dict):
-        end_time = datetime.strptime(allocation['realEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+        alloc_end_time = datetime.strptime(allocation['realEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
 
         scheduled_end = datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
         policy_start_date = datetime(year=2024, month=1, day=23)
         if scheduled_end < policy_start_date:
             scheduled_end = policy_start_date
 
-        overdue_length = end_time - scheduled_end
+        type_buckets = {}
+        for item in allocation['items']:
+            end_time = datetime.strptime(item['realReturnTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+            overdue_length = end_time - scheduled_end
+            
+            try:
+                type_buckets[overdue_length].append(item['rtype'])
+            except IndexError as e:
+                type_buckets[overdue_length] = [item['rtype']]
 
-        allocation_types = [item['rtype'] for item in allocation['items'] if item['action'].lower() == 'checkout']
+        results = []
+        for overdue_length, type_bucket in type_buckets.items():
+            result = Repercussions(overdue_length, type_bucket)
+            result.update()
 
-        results = Repercussions(overdue_length.days, allocation_types)
-
-        results.update()
+            results.append(result.final_consequences)
         
-        return results.final_consequences, end_time, allocation['checkoutCenter']
+        return max(results), alloc_end_time, allocation['checkoutCenter']
 
     def get_checkout_emails(self, center, start_time, end_time):
         emails = []
