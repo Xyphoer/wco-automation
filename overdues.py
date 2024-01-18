@@ -90,7 +90,12 @@ class Overdues:
             else:
                 center = allocation['checkoutCenter']
                 patron_oid = allocation['patron']['oid']
-                overdue_length = datetime.now() - datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+
+                scheduled_end = datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+                policy_start_date = datetime(year=2024, month=1, day=23)
+                if scheduled_end < policy_start_date:
+                    scheduled_end = policy_start_date
+                overdue_length = datetime.now() - scheduled_end
 
                 consequences = Repercussions(overdue_length, allocation['allTypes']).update()
                 

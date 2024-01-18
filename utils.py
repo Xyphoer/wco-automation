@@ -288,7 +288,12 @@ class utils:
     def get_overdue_consequence(self, allocation) -> (dict, datetime, dict):
         end_time = datetime.strptime(allocation['realEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
 
-        overdue_length = end_time - datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+        scheduled_end = datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+        policy_start_date = datetime(year=2024, month=1, day=23)
+        if scheduled_end < policy_start_date:
+            scheduled_end = policy_start_date
+
+        overdue_length = end_time - scheduled_end
 
         results = Repercussions(overdue_length.days, allocation['allTypes'])
 
