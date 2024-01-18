@@ -32,7 +32,8 @@ class Overdues:
     # (Turn into place_invoice and have hold & fine?) place hold and update db. NOTE: Done -- This does not update overdue count, just the hold status.
     def place_hold(self, oid: int, checkout_center, allocation = None, end = None, message = '', update_db = True):
         account = self.connection.get_account(oid).json()
-        invoice = self.connection.create_invoice(account['payload']['defaultAccount'], account['session']['organization'], checkout_center, allocation=allocation).json()
+        invoice = self.connection.create_invoice(account['payload']['defaultAccount'], account['session']['organization'], checkout_center, allocation=allocation,
+                                                 description="Invoice for violation of overdue policies: https://kb.wisc.edu/infolabs/131963").json()
         _hold = self.connection.apply_invoice_hold(invoice['payload'], message)
         invoice_oid = invoice['payload']['oid']
 

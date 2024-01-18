@@ -252,13 +252,14 @@ class Connection:
     # Description: Create an invoice for said account, under said organization (should always be LTG),
     #              in said checkout center.
     #####
-    def create_invoice(self, account, organization, center, allocation=None):
+    def create_invoice(self, account, organization, center, allocation=None, description=''):
         return requests.post(url = self.host + "/rest/invoice/new",
                             headers = {"Authorization": "Bearer " + self.session_token},
                             json = {"account": account,
                                     "organization": organization,
                                     "allocation": allocation,
-                                    "checkoutCenter": center})
+                                    "checkoutCenter": center,
+                                    "description": description})
     
     def waive_invoice(self, invoice, comment: str = '') -> requests.Response:
         return requests.post(url = self.host + "/rest/invoice/waive",
