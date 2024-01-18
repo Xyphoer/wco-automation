@@ -294,6 +294,11 @@ class Connection:
                                     "invoice": invoice,
                                     "subtype": subtype})
     
+    def email_invoice(self, invoice):
+        return requests.post(url = self.host + "/rest/invoice/emailInvoice",
+                            headers = {"Authorization": "Bearer " + self.session_token},
+                            json = {"invoice": invoice})
+    
     #####
     # Name: close
     # Inputs: none

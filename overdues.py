@@ -30,6 +30,7 @@ class Overdues:
         pass
 
     # (Turn into place_invoice and have hold & fine?) place hold and update db. NOTE: Done -- This does not update overdue count, just the hold status.
+    # automatically sends an email based on WCO settins
     def place_hold(self, oid: int, checkout_center, allocation = None, end = None, message = '', update_db = True):
         account = self.connection.get_account(oid).json()
         invoice = self.connection.create_invoice(account['payload']['defaultAccount'], account['session']['organization'], checkout_center, allocation=allocation,
@@ -68,6 +69,7 @@ class Overdues:
 
         invoice = self.connection.get_invoice(invoice_oid)
         self.connection.add_charge(invoice, amount=cost/100, subtype="Loss")
+        self.connection.email_invoice(invoice)
 
         self.db.run("UPDATE overdues " \
                     f"SET fee_status = {True} " \
@@ -258,9 +260,6 @@ class Overdues:
                     f"hold_status = {False}, hold_remove_time = NULL::timestamp, invoice_oid = NULL " \
                     f"FROM (VALUES ({', '.join(holds_removed)})) AS batch(patron_oid) " \
                      "WHERE overdues.patron_oid = batch.patron_oid")
-
-    def _update_db(self, patrons_oids, ):
-        pass
 
 wco_host = ''
 wco_userid = ''
