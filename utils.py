@@ -290,9 +290,9 @@ class utils:
 
         scheduled_end = datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
         tz = timezone(timedelta(hours=-6), name='utc-6')
-        # policy_start_date = datetime(year=2024, month=1, day=23, tzinfo=tz)
-        # if scheduled_end < policy_start_date:
-        #     scheduled_end = policy_start_date
+        policy_start_date = datetime(year=2024, month=1, day=23, tzinfo=tz)
+        if scheduled_end < policy_start_date:
+            scheduled_end = policy_start_date
 
         type_buckets = {}
         for item in allocation['items']:

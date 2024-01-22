@@ -111,7 +111,8 @@ class Overdues:
                         invoice_oid = self.db.one(f'SELECT invoice_oid FROM overdues WHERE patron_oid={patron_oid}')
                     if consequences['Fee']:
                         if patron_oid not in current_fines:  # only processing one checkout at a time
-                            self.place_fee(invoice_oid, allocation['aggregateValueOut'])
+                            charge = allocation['aggregateValueOut'] if allocation['aggregateValueOut'] else 2000
+                            self.place_fee(invoice_oid, charge)
                         if consequences['Registrar Hold']:
                             person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
                             print(f'Registrar Hold needed for:{person["name"]} - ({person["barcode"]})')
@@ -137,9 +138,6 @@ class Overdues:
                 continue
             
             conseq, end_time, checkout_center = self.utils.get_overdue_consequence(allocation)
-            # add initial stop date (to not count past when we start)
-
-            ### Set hold end time to start counting from once replacement fee is paid (if applicable)
 
             # If they have a fine, remove it as they returned the item
             for entry in current_fines:
@@ -258,7 +256,7 @@ class Overdues:
         potential_holds = self.db.all('SELECT patron_oid, hold_remove_time, invoice_oid FROM overdues WHERE hold_status')
 
         for patron_oid, hold_remove_time, invoice_oid in potential_holds:
-            if hold_remove_time < now:
+            if hold_remove_time and hold_remove_time < now:
                 self.remove_hold(invoice_oid)
                 holds_removed.append(f"({patron_oid})")
         if holds_removed:
@@ -316,6 +314,6 @@ db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, cou
 wco_conn = Connection(wco_userid, wco_password, wco_host)
 oconn = Overdues(wco_conn, utils(wco_conn), db)
 
-oconn.update('1/18/2024')
+oconn.update('1/22/2024')
 
 #oconn.place_hold(14652305, wco_conn.centers['college'], message='foobar')
