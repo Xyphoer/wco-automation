@@ -5,7 +5,7 @@ import csv
 import re
 import webbrowser
 import pathlib
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 #####
 # Name: dupeCheckouts
@@ -289,9 +289,10 @@ class utils:
         alloc_end_time = datetime.strptime(allocation['realEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
 
         scheduled_end = datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
-        policy_start_date = datetime(year=2024, month=1, day=23)
-        if scheduled_end < policy_start_date:
-            scheduled_end = policy_start_date
+        tz = timezone(timedelta(hours=-6), name='utc-6')
+        # policy_start_date = datetime(year=2024, month=1, day=23, tzinfo=tz)
+        # if scheduled_end < policy_start_date:
+        #     scheduled_end = policy_start_date
 
         type_buckets = {}
         for item in allocation['items']:
@@ -299,9 +300,9 @@ class utils:
             overdue_length = end_time - scheduled_end
             
             try:
-                type_buckets[overdue_length].append(item['rtype'])
-            except IndexError as e:
-                type_buckets[overdue_length] = [item['rtype']]
+                type_buckets[overdue_length.days].append(item['rtype'])
+            except KeyError as e:
+                type_buckets[overdue_length.days] = [item['rtype']]
 
         results = []
         for overdue_length, type_bucket in type_buckets.items():
@@ -426,7 +427,7 @@ class Repercussions:
     def _ceil(self, idx):
         out = 0
         for limit in self.upper_limits:
-            if idx > limit:
+            if idx >= limit:
                 out = limit
         return out
     

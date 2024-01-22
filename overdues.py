@@ -1,6 +1,6 @@
 from connection import Connection
 from postgres import Postgres
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from utils import utils, Repercussions
 
 class Overdues:
@@ -12,10 +12,10 @@ class Overdues:
     
     ## can handle returned items and holds. Need fines still
     def update(self, start_time: str, end_time: str = '') -> dict:
-        self._process_current_overdues()
         self._process_returned_overdues(start_time, end_time)
         self._process_fines()
         self._remove_holds()
+        self._process_current_overdues()
     
     def get_patrons(self, oid: list = [], name: list = [], wiscard: list = []) -> list:
         # get patrons from database
@@ -61,14 +61,14 @@ class Overdues:
     # remove a specific hold
     def remove_hold(self, invoice_oid: int):
         invoice = self.connection.get_invoice(invoice_oid).json()['payload']
-        invoice = self.connection.remove_invoice_hold(invoice)
-        invoice = self.connection.waive_invoice(invoice)
-        return invoice
+        self.connection.remove_invoice_hold(invoice)  # NOTE: Works, but WCO thows 500 error if hold already gone
+        self.connection.waive_invoice(invoice)
+        return
 
     def place_fee(self, invoice_oid, cost: int):
 
-        invoice = self.connection.get_invoice(invoice_oid)
-        self.connection.add_charge(invoice, amount=cost/100, subtype="Loss")
+        invoice = self.connection.get_invoice(invoice_oid).json()['payload']
+        self.connection.add_charge(invoice, amount=cost, subtype="Loss")
         self.connection.email_invoice(invoice)
 
         self.db.run("UPDATE overdues " \
@@ -89,30 +89,32 @@ class Overdues:
             # TEMP BLOCKER -- NEED TEST
             if allocation['patron']['oid'] != 14652305:
                 continue
-            else:
+            elif allocation['patron']['oid'] == 14652305:
                 center = allocation['checkoutCenter']
                 patron_oid = allocation['patron']['oid']
 
                 scheduled_end = datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
-                policy_start_date = datetime(year=2024, month=1, day=23)
+                tz = timezone(timedelta(hours=-6), name='utc-6')
+                #tz.dst = True
+                policy_start_date = datetime(year=2024, month=1, day=23, tzinfo=tz)
                 if scheduled_end < policy_start_date:
                     scheduled_end = policy_start_date
-                overdue_length = datetime.now() - scheduled_end
+                overdue_length = (datetime.now(tz=tz) - scheduled_end).days
 
                 allocation_types = [item['rtype'] for item in allocation['items'] if item['action'].lower() == 'checkout']
                 consequences = Repercussions(overdue_length, allocation_types).update()
-                
+
                 if consequences['Hold']:
-                    if patron_oid not in current_holds:
+                    if patron_oid not in current_holds:  # only processing one checkout at a time
                         invoice_oid = self.place_hold(patron_oid, center)['oid']
                     else:
                         invoice_oid = self.db.one(f'SELECT invoice_oid FROM overdues WHERE patron_oid={patron_oid}')
                     if consequences['Fee']:
-                        if patron_oid not in current_fines:
+                        if patron_oid not in current_fines:  # only processing one checkout at a time
                             self.place_fee(invoice_oid, allocation['aggregateValueOut'])
                         if consequences['Registrar Hold']:
-                            person = self.connection.get_patron(patron_oid, ['patronBarcode']).json()['payload']
-                            print(f'Registrar Hold needed for:{person["name"]} - ({person["patronBarcode"]})')
+                            person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
+                            print(f'Registrar Hold needed for:{person["name"]} - ({person["barcode"]})')
         return
 
     # get all returned overdues and resolve hold end date, fine, or fully create if needed. -- NOTE: Need fine implement & alloc with diff return times handler
@@ -130,6 +132,9 @@ class Overdues:
         response = self.connection.get_completed_overdue_allocations(start_search_time, end_search_time)
 
         for allocation in response.json()['payload']['result']:
+
+            if allocation['patron']['oid'] != 14652305:
+                continue
             
             conseq, end_time, checkout_center = self.utils.get_overdue_consequence(allocation)
             # add initial stop date (to not count past when we start)
@@ -138,14 +143,19 @@ class Overdues:
 
             # If they have a fine, remove it as they returned the item
             for entry in current_fines:
-                if allocation['patron']['oid'] in entry[0]:
+                if allocation['patron']['oid'] == entry[0]:
+                    struck = False
                     invoice = self.connection.get_invoice(entry[1]).json()['payload']
                     invoice_lines = self.connection.get_invoice_lines(invoice).json()['payload']['result']
                     for invoice_line in invoice_lines:
-                        self.connection.strike_invoice_line(invoice, invoice_line)
+                        if invoice_line['type'] == 'CHARGE' and not invoice_line['struck']:
+                            self.connection.strike_invoice_line(invoice, invoice_line)  # APPLY HOLD AGAIN, PAYING REMOVES IT
+                            struck = True
+                    if struck:
+                        self.connection.apply_invoice_hold(invoice)
                     if conseq['Registrar Hold']:
-                        name = self.connection.get_patron(allocation['patron']['oid'], ['name']).json()['payload']['name']
-                        print(f"Items returned, registrar hold can be removed for oid: {allocation['patron']['oid']} -- {name}")
+                        # name = self.connection.get_patron(allocation['patron']['oid'], ['name']).json()['payload']['name']
+                        print(f"Items returned, registrar hold can be removed for oid: {allocation['patron']['oid']} -- {allocation['patron']['name']}")
 
             # handle partial returns before due date
             item_count = 0
@@ -172,52 +182,48 @@ class Overdues:
                                                             checkout_center]    # checkout center for hold
 
         for key, value in insert_dict.items():
-            invoice = False
             invoice_oid = False
 
             if key not in current_holds:
                 if value[1] == 'True':
                     invoice = self.place_hold(key, checkout_center=value[5], update_db=False)
                     invoice_oid = invoice['oid']
-                    pass
-
-            ### Fees and Registrar holds applied while overdue. remove on return (here)
-            if value[2] == 'True':
-                value[4] = 'NULL'  # remove hold remove time if they have a fine. Must be paid first.
-                # self.place_fee(invoice, ) # NOTE: if hold already placed, need to get invoice a different way
 
             insert_query += f"({key}, {value[0]}, {value[1]}, {value[2]}, {value[3]}, {value[4]}, {invoice_oid if invoice_oid else 'NULL'}),\n" 
         
-        self.db.run("INSERT INTO " \
-                        f"overdues (patron_oid, count, hold_status, fee_status, hold_length, hold_remove_time, invoice_oid) " \
-                    "VALUES " \
-                        f"{insert_query.strip()[:-1]}" \
-                    "ON CONFLICT (patron_oid) DO " \
-                        "UPDATE SET count = overdues.count + EXCLUDED.count, " \
-                        "hold_status = overdues.hold_status OR EXCLUDED.hold_status, " \
-                        "fee_status = overdues.fee_status OR EXCLUDED.fee_status, " \
-                        "hold_remove_time = CASE " \
-                            "WHEN overdues.fee_status OR EXCLUDED.fee_status " \
-                                "THEN NULL " \
-                            "WHEN overdues.count = 5 " \
-                                f"THEN '{end_time + timedelta(days=90)}' " \
-                            "WHEN overdues.count = 10 " \
-                                f"THEN '{end_time + timedelta(days=180)}' " \
-                            "WHEN overdues.count > 11 " \
-                                f"THEN NULL " \
-                            "WHEN overdues.hold_remove_time < EXCLUDED.hold_remove_time " \
-                                "THEN EXCLUDED.hold_remove_time " \
-                            "WHEN overdues.hold_remove_time IS NOT NULL " \
-                                "THEN overdues.hold_remove_time " \
-                            "ELSE EXCLUDED.hold_remove_time " \
-                        "END" \
-                        "invoice_oid = CASE " \
-                            "WHEN EXCLUDED.invoice_oid IS NOT NULL " \
-                                "THEN EXCLUDED.invoice_oid " \
-                            "WHEN overdues.invoice_oid IS NOT NULL " \
-                                "THEN overdues.invoice_oid " \
-                            "ELSE NULL " \
-                        "END")
+
+        # "WHEN overdues.fee_status OR EXCLUDED.fee_status " \
+        #                         "THEN NULL " \
+            # fee_status = overdues.fee_status OR EXCLUDED.fee_status
+        if insert_query:
+            self.db.run("INSERT INTO " \
+                            f"overdues (patron_oid, count, hold_status, fee_status, hold_length, hold_remove_time, invoice_oid) " \
+                        "VALUES " \
+                            f"{insert_query.strip()[:-1]}" \
+                        "ON CONFLICT (patron_oid) DO " \
+                            "UPDATE SET count = overdues.count + EXCLUDED.count, " \
+                            "hold_status = overdues.hold_status OR EXCLUDED.hold_status, " \
+                            "fee_status = EXCLUDED.fee_status, " \
+                            "hold_remove_time = CASE " \
+                                "WHEN overdues.count = 5 " \
+                                    f"THEN (EXCLUDED.hold_remove_time - (EXCLUDED.hold_length || ' days')::INTERVAL + '90 days'::INTERVAL)::TIMESTAMP " \
+                                "WHEN overdues.count = 10 " \
+                                    f"THEN (EXCLUDED.hold_remove_time - (EXCLUDED.hold_length || ' days')::INTERVAL + '180 days'::INTERVAL)::TIMESTAMP " \
+                                "WHEN overdues.count > 11 " \
+                                    f"THEN NULL " \
+                                "WHEN overdues.hold_remove_time < EXCLUDED.hold_remove_time " \
+                                    "THEN EXCLUDED.hold_remove_time " \
+                                "WHEN overdues.hold_remove_time IS NOT NULL " \
+                                    "THEN overdues.hold_remove_time " \
+                                "ELSE EXCLUDED.hold_remove_time " \
+                            "END, " \
+                            "invoice_oid = CASE " \
+                                "WHEN EXCLUDED.invoice_oid IS NOT NULL " \
+                                    "THEN EXCLUDED.invoice_oid " \
+                                "WHEN overdues.invoice_oid IS NOT NULL " \
+                                    "THEN overdues.invoice_oid " \
+                                "ELSE NULL " \
+                            "END")
         
         return
 
@@ -235,10 +241,10 @@ class Overdues:
                 print(f"Patron oid: {patron_oid} -- paid fine -- {name} -- Return & Delete item")
 
                 date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
-                db_update.append((patron_oid, date_paid + timedelta(days=hold_length)))   
+                db_update.append((patron_oid, date_paid + timedelta(days=hold_length)))   # NOTE: if fine on second overdue of overlapping, uses first length. NOT IDEAL (fallback anything though - all paid fines should be returned)
             # if not invoice['isHold']: # decide methodology (place_hold creates invoice... Seperate functions? or just hold stuff here) -- Note: Should not come into play, backup for if staff removes hold. Update path.
         
-        if db_update:
+        if db_update:   # NOTE: if has current overdue time does not preserve/take greatest, overwrites.
             self.db.run(f"UPDATE overdues SET " \
                             "hold_remove_time = batch.hold_remove_time " \
                         f"FROM (VALUES ({', '.join(db_update)})) AS batch(patron_oid, hold_remove_time) " \
@@ -255,11 +261,11 @@ class Overdues:
             if hold_remove_time < now:
                 self.remove_hold(invoice_oid)
                 holds_removed.append(f"({patron_oid})")
-        
-        self.db.run(f"UPDATE overdues SET " \
-                    f"hold_status = {False}, hold_remove_time = NULL::timestamp, invoice_oid = NULL " \
-                    f"FROM (VALUES ({', '.join(holds_removed)})) AS batch(patron_oid) " \
-                     "WHERE overdues.patron_oid = batch.patron_oid")
+        if holds_removed:
+            self.db.run(f"UPDATE overdues SET " \
+                        f"hold_status = {False}, hold_remove_time = NULL::timestamp, invoice_oid = NULL " \
+                        f"FROM (VALUES ({', '.join(holds_removed)})) AS batch(patron_oid) " \
+                        "WHERE overdues.patron_oid = batch.patron_oid")
 
 wco_host = ''
 wco_userid = ''
@@ -310,6 +316,6 @@ db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, cou
 wco_conn = Connection(wco_userid, wco_password, wco_host)
 oconn = Overdues(wco_conn, utils(wco_conn), db)
 
-#oconn.update('11/15/2023', '11/16/2023')
+oconn.update('1/18/2024')
 
-oconn.place_hold(14652305, wco_conn.centers['college'], message='foobar')
+#oconn.place_hold(14652305, wco_conn.centers['college'], message='foobar')

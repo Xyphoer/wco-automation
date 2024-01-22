@@ -227,9 +227,9 @@ class Connection:
                                 json = {"oid": invoice_oid})
     
     def get_invoice_lines(self, invoice):
-        return requests.post(url = self.host + "/rest/invoice/search",
+        return requests.post(url = self.host + "/rest/invoiceLine/search",
                                 headers = {"Authorization": "Bearer " + self.session_token},
-                                json = {"query": invoice})
+                                json = {"query": {"invoice": invoice}})
     
     def strike_invoice_line(self, invoice, line, comment = ""):
         return requests.post(url = self.host + "/rest/invoice/strikeInvoiceLine",
@@ -262,10 +262,14 @@ class Connection:
                                     "description": description})
     
     def waive_invoice(self, invoice, comment: str = '') -> requests.Response:
-        return requests.post(url = self.host + "/rest/invoice/waive",
+        return requests.post(url = self.host + "/rest/invoice/waiveInvoices",
                             headers = {"Authorization": "Bearer " + self.session_token},
-                            json = {"invoices": invoice,
-                                    "comment": comment})
+                            json = {"invoices": [invoice]})
+    
+        # return requests.post(url = self.host + "/rest/invoice/waive",
+        #                     headers = {"Authorization": "Bearer " + self.session_token},
+        #                     json = {"invoice": invoice,
+        #                             "comment": comment})
 
     def apply_invoice_hold(self, invoice, comment: str = ''):
         return requests.post(url = self.host + "/rest/invoice/applyHold",
@@ -287,7 +291,7 @@ class Connection:
     #              Subtype must be one of "Abuse Fine", "Late Fine", "Loss", "Damage", "Usage Fee", "Supplies",
     #              "Overtime", "Labor", "Shipping", or "Other."
     #####
-    def add_charge(self, invoice, amount: str, subtype: str):
+    def add_charge(self, invoice, amount, subtype: str):
         return requests.post(url = self.host + "/rest/invoice/addCharge",
                             headers = {"Authorization": "Bearer " + self.session_token},
                             json = {"amount": amount,
