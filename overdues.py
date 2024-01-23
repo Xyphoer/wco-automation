@@ -83,13 +83,11 @@ class Overdues:
 
         current_holds = self.db.all('SELECT patron_oid FROM overdues WHERE hold_status')
         current_fines = self.db.all('SELECT patron_oid FROM overdues WHERE fee_status')
+        excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations')
 
         for allocation in response.json()['payload']['result']:
 
-            # TEMP BLOCKER -- NEED TEST
-            if allocation['patron']['oid'] != 14652305:
-                continue
-            elif allocation['patron']['oid'] == 14652305:
+            if allocation['oid'] not in excluded_checkouts:
                 center = allocation['checkoutCenter']
                 patron_oid = allocation['patron']['oid']
 
@@ -105,17 +103,23 @@ class Overdues:
                 consequences = Repercussions(overdue_length, allocation_types).update()
 
                 if consequences['Hold']:
-                    if patron_oid not in current_holds:  # only processing one checkout at a time
+                    if patron_oid not in current_holds and allocation['oid'] not in excluded_checkouts:  # only processing one checkout at a time
                         invoice_oid = self.place_hold(patron_oid, center)['oid']
                     else:
                         invoice_oid = self.db.one(f'SELECT invoice_oid FROM overdues WHERE patron_oid={patron_oid}')
+                        if allocation['oid'] in excluded_checkouts:
+                            self.remove_hold(invoice_oid)
+                            if consequences['Registrar Hold']:
+                                person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
+                                print(f'Excluded Registrar Hold Patron - Remove: {person["name"]} - ({person["barcode"]})')
+                            continue
                     if consequences['Fee']:
                         if patron_oid not in current_fines:  # only processing one checkout at a time
                             charge = allocation['aggregateValueOut'] if allocation['aggregateValueOut'] else 2000
                             self.place_fee(invoice_oid, charge)
                         if consequences['Registrar Hold']:
                             person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
-                            print(f'Registrar Hold needed for:{person["name"]} - ({person["barcode"]})')
+                            print(f'Registrar Hold needed for: {person["name"]} - ({person["barcode"]})')
         return
 
     # get all returned overdues and resolve hold end date, fine, or fully create if needed. -- NOTE: Need fine implement & alloc with diff return times handler
@@ -129,55 +133,53 @@ class Overdues:
 
         current_holds = self.db.all('SELECT patron_oid FROM overdues WHERE hold_status')
         current_fines = self.db.all('SELECT patron_oid, invoice_oid FROM overdues WHERE fee_status')
+        excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations')
 
         response = self.connection.get_completed_overdue_allocations(start_search_time, end_search_time)
 
         for allocation in response.json()['payload']['result']:
+            if allocation['oid'] not in excluded_checkouts:
+                conseq, end_time, checkout_center = self.utils.get_overdue_consequence(allocation)
 
-            if allocation['patron']['oid'] != 14652305:
-                continue
-            
-            conseq, end_time, checkout_center = self.utils.get_overdue_consequence(allocation)
+                # If they have a fine, remove it as they returned the item
+                for entry in current_fines:
+                    if allocation['patron']['oid'] == entry[0]:
+                        struck = False
+                        invoice = self.connection.get_invoice(entry[1]).json()['payload']
+                        invoice_lines = self.connection.get_invoice_lines(invoice).json()['payload']['result']
+                        for invoice_line in invoice_lines:
+                            if invoice_line['type'] == 'CHARGE' and not invoice_line['struck']:
+                                self.connection.strike_invoice_line(invoice, invoice_line)  # APPLY HOLD AGAIN, PAYING REMOVES IT
+                                struck = True
+                        if struck:
+                            self.connection.apply_invoice_hold(invoice)
+                        if conseq['Registrar Hold']:
+                            # name = self.connection.get_patron(allocation['patron']['oid'], ['name']).json()['payload']['name']
+                            print(f"Items returned, registrar hold can be removed for oid: {allocation['patron']['oid']} -- {allocation['patron']['name']}")
 
-            # If they have a fine, remove it as they returned the item
-            for entry in current_fines:
-                if allocation['patron']['oid'] == entry[0]:
-                    struck = False
-                    invoice = self.connection.get_invoice(entry[1]).json()['payload']
-                    invoice_lines = self.connection.get_invoice_lines(invoice).json()['payload']['result']
-                    for invoice_line in invoice_lines:
-                        if invoice_line['type'] == 'CHARGE' and not invoice_line['struck']:
-                            self.connection.strike_invoice_line(invoice, invoice_line)  # APPLY HOLD AGAIN, PAYING REMOVES IT
-                            struck = True
-                    if struck:
-                        self.connection.apply_invoice_hold(invoice)
-                    if conseq['Registrar Hold']:
-                        # name = self.connection.get_patron(allocation['patron']['oid'], ['name']).json()['payload']['name']
-                        print(f"Items returned, registrar hold can be removed for oid: {allocation['patron']['oid']} -- {allocation['patron']['name']}")
+                # handle partial returns before due date
+                item_count = 0
+                for item in allocation['items']:
+                    item_returned = datetime.strptime(item['realReturnTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+                    allocation_due = datetime.strptime(item['returnTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+                    if item_returned > allocation_due:
+                        item_count += 1
 
-            # handle partial returns before due date
-            item_count = 0
-            for item in allocation['items']:
-                item_returned = datetime.strptime(item['realReturnTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
-                allocation_due = datetime.strptime(item['returnTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
-                if item_returned > allocation_due:
-                    item_count += 1
+                try:
+                    insert_dict[allocation['patron']['oid']][0] += item_count
+                    insert_dict[allocation['patron']['oid']][1:] = ['True' if conseq['Hold'] else 'False',  # hold_status
+                                                                    'False',                                # fee_status ALWAYS false for returned items
+                                                                    conseq['Hold'],                         # hold_length
+                                                                    f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time
+                                                                    checkout_center]    # checkout center for hold
 
-            try:
-                insert_dict[allocation['patron']['oid']][0] += item_count
-                insert_dict[allocation['patron']['oid']][1:] = ['True' if conseq['Hold'] else 'False',  # hold_status
+                except KeyError as e:
+                    insert_dict[allocation['patron']['oid']] = [item_count,
+                                                                'True' if conseq['Hold'] else 'False',  # hold_status
                                                                 'False',                                # fee_status ALWAYS false for returned items
                                                                 conseq['Hold'],                         # hold_length
                                                                 f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time
                                                                 checkout_center]    # checkout center for hold
-
-            except KeyError as e:
-                insert_dict[allocation['patron']['oid']] = [item_count,
-                                                            'True' if conseq['Hold'] else 'False',  # hold_status
-                                                            'False',                                # fee_status ALWAYS false for returned items
-                                                            conseq['Hold'],                         # hold_length
-                                                            f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time
-                                                            checkout_center]    # checkout center for hold
 
         for key, value in insert_dict.items():
             invoice_oid = False
@@ -264,6 +266,19 @@ class Overdues:
                         f"hold_status = {False}, hold_remove_time = NULL::timestamp, invoice_oid = NULL " \
                         f"FROM (VALUES ({', '.join(holds_removed)})) AS batch(patron_oid) " \
                         "WHERE overdues.patron_oid = batch.patron_oid")
+    
+    def excluded_allocations(self, allocations: str):
+        allocation_list = allocations.split()
+        insert_query = ""
+        for allocation in allocation_list:
+            insert_query += self.connection.get_checkout(id=allocation).json()['payload']['oid'] + '\n'
+        
+        if insert_query:
+            self.db.run("INSERT INTO " \
+                            "excluded_allocations (allocation_oid) " \
+                        "VALUES " \
+                            f"{insert_query.strip()[:-1]}" \
+                        "ON CONFLICT (allocation_oid) DO NOTHING")
 
 wco_host = ''
 wco_userid = ''
@@ -310,10 +325,12 @@ except OSError as e:
 db = Postgres(f"dbname=postgres user=postgres password={postgres_pass}")
 
 db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, hold_length INTEGER, hold_remove_time TIMESTAMP, invoice_oid INTEGER)")
+db.run("CREATE TABLE IF NOT EXISTS excluded_allocations (allocation_oid INTEGER PRIMARY KEY, timeout TIMESTAMP)")
 
 wco_conn = Connection(wco_userid, wco_password, wco_host)
 oconn = Overdues(wco_conn, utils(wco_conn), db)
 
+oconn.excluded_allocations(input("Excluded allocations (whitespace seperation): "))
 oconn.update('1/22/2024')
 
 #oconn.place_hold(14652305, wco_conn.centers['college'], message='foobar')
