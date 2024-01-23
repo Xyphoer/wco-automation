@@ -435,7 +435,7 @@ class Repercussions:
         type_buckets = []
 
         for resource_type in self.alloc_types:
-            if 'reserve' in resource_type['path'].lower():
+            if 'reserve' in resource_type['path'].lower() and 'non-reserve' not in resource_type['path'].lower():
                 type_buckets.append('Reserve')
             elif 'accessories' in resource_type['path'].lower():
                 type_buckets.append('Accessories')
