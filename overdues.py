@@ -162,7 +162,7 @@ class Overdues:
                 for item in allocation['items']:
                     item_returned = datetime.strptime(item['realReturnTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
                     allocation_due = datetime.strptime(item['returnTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
-                    if item_returned > allocation_due:
+                    if item_returned > allocation_due + timedelta(minutes=10):
                         item_count += 1
 
                 try:
@@ -271,7 +271,7 @@ class Overdues:
         allocation_list = allocations.split()
         insert_query = ""
         for allocation in allocation_list:
-            insert_query += self.connection.get_checkout(id=allocation).json()['payload']['oid'] + '\n'
+            insert_query += "(" + str(self.connection.get_checkout(id=allocation).json()['payload']['result'][0]['oid']) + ")," + '\n'
         
         if insert_query:
             self.db.run("INSERT INTO " \
@@ -331,6 +331,6 @@ wco_conn = Connection(wco_userid, wco_password, wco_host)
 oconn = Overdues(wco_conn, utils(wco_conn), db)
 
 oconn.excluded_allocations(input("Excluded allocations (whitespace seperation): "))
-oconn.update('1/22/2024')
+oconn.update('1/23/2024')
 
 #oconn.place_hold(14652305, wco_conn.centers['college'], message='foobar')
