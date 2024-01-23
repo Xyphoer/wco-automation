@@ -5,10 +5,10 @@ from utils import utils, Repercussions
 
 class Overdues:
 
-    def __init__(self, connection: Connection, utilities: utils, db):
+    def __init__(self, connection: Connection, utilities: utils, db_pass):
         self.connection = connection
         self.utils = utilities
-        self.db = db
+        self.db = self._connect_to_db()
     
     ## can handle returned items and holds. Need fines still
     def update(self, start_time: str, end_time: str = '') -> dict:
@@ -16,6 +16,12 @@ class Overdues:
         self._process_fines()
         self._remove_holds()
         self._process_current_overdues()
+    
+    def _connect_to_db(self) -> Postgres:
+        db = Postgres(f"dbname=postgres user=postgres password={self.db_pass}")
+        db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, hold_length INTEGER, hold_remove_time TIMESTAMP, invoice_oid INTEGER)")
+        db.run("CREATE TABLE IF NOT EXISTS excluded_allocations (allocation_oid INTEGER PRIMARY KEY, timeout TIMESTAMP)")
+        return db
     
     def get_patrons(self, oid: list = [], name: list = [], wiscard: list = []) -> list:
         # get patrons from database
@@ -279,58 +285,3 @@ class Overdues:
                         "VALUES " \
                             f"{insert_query.strip()[:-1]}" \
                         "ON CONFLICT (allocation_oid) DO NOTHING")
-
-wco_host = ''
-wco_userid = ''
-wco_password = ''
-redmine_host = ''
-redmine_session_cookie = ''
-redmine_auth_key = ''
-shibsession_cookie_name = ''
-shibsession_cookie_value = ''
-postgres_pass = ''
-
-try:
-    with open('config.txt', 'r', encoding='utf-8') as in_file:
-        for line in in_file:
-            if "wco_host" in line.lower():
-                wco_host = line.split("=")[1].strip()
-            elif "wco_user_id" in line.lower():
-                wco_userid = line.split("=")[1].strip()
-            elif "wco_password" in line.lower():
-                wco_password = line.split("=")[1].strip()
-            elif "redmine_host" in line.lower():
-                redmine_host = line.split("=")[1].strip()
-            elif "redmine_session_cookie" in line.lower():
-                redmine_session_cookie = line.split("=")[1].strip()
-            elif "shibsession_cookie_name" in line.lower():
-                shibsession_cookie_name = line.split("=")[1].strip()
-            elif "shibsession_cookie_value" in line.lower():
-                shibsession_cookie_value = line.split("=")[1].strip()
-            elif "redmine_auth_key" in line.lower():
-                redmine_auth_key = line.split("=")[1].strip()
-            elif "postgres" in line.lower():
-                postgres_pass = line.split("=")[1].strip()
-
-                
-except OSError as e:
-        wco_host = input("WebCheckout host: ")
-        wco_userid = input("WebCheckout user id: ")
-        wco_password = input("WebCheckout Password: ")
-        redmine_host = input("Redmine host: ")
-        redmine_session_cookie = input("redmine_session_cookie: ")
-        shibsession_cookie_name = input("_shibsession cookie name: ")
-        shibsession_cookie_value = input("_shibsession cookie value: ")
-
-db = Postgres(f"dbname=postgres user=postgres password={postgres_pass}")
-
-db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, hold_length INTEGER, hold_remove_time TIMESTAMP, invoice_oid INTEGER)")
-db.run("CREATE TABLE IF NOT EXISTS excluded_allocations (allocation_oid INTEGER PRIMARY KEY, timeout TIMESTAMP)")
-
-wco_conn = Connection(wco_userid, wco_password, wco_host)
-oconn = Overdues(wco_conn, utils(wco_conn), db)
-
-oconn.excluded_allocations(input("Excluded allocations (whitespace seperation): "))
-oconn.update('1/23/2024')
-
-#oconn.place_hold(14652305, wco_conn.centers['college'], message='foobar')

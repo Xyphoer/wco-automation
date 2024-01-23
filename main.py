@@ -1,6 +1,7 @@
 from connection import Connection
 from redmine import RedmineConnection
 from utils import *
+from overdues import Overdues
 import argparse
 
 # set up argparse
@@ -33,6 +34,9 @@ parser.add_argument('-ce', '--checkout_emails', nargs=3,
                     help = 'Gets a list of emails for patrons from open checkouts between the two dates for the specified center.' \
                     'Format: start_date end_date center_to_consider' \
                     'Example usage: main.py -ce mm/dd/yyyy mm/dd/yyyy center')
+parser.add_argument('po', '--process-overdues', action = 'store_true',
+                    help = 'Runs the overdues repercussions script.' \
+                    'Example usage: main.py -po')
 
 args = parser.parse_args()
 
@@ -68,6 +72,8 @@ try:
                 redmine_auth_key = line.split("=", maxsplit=1)[1].strip()
             elif "project_query_ext" in line.lower():
                 project_query_ext = line.split("=", maxsplit=1)[1].strip()
+            elif "postgres" in line.lower():
+                postgres_pass = line.split("=")[1].strip()
                 
 except OSError as e:  # file not found or permission error
         wco_host = input("WebCheckout host: ")
@@ -175,6 +181,15 @@ try:
         utils = utils(wco_connection)
 
         utils.get_checkout_emails(start_time=args.checkout_emails[0], end_time=args.checkout_emails[1], center=args.checkout_emails[2])
+    
+    if args.process_overdues:
+        overdues_start = input("Overdues Start Date (mm/dd/yyyy): ")
+        overdues_end = input("Overdues End Date: ")
+        print(f"Processing overdues with start date {overdues_start}, end date {overdues_end if overdues_end else 'Now'}...")
+
+        oconn = Overdues(wco_connection, utils(wco_connection), postgres_pass)
+        oconn.excluded_allocations(input("Excluded allocations (whitespace seperation): "))
+        oconn.update(overdues_start, overdues_end)
 
 finally:
      # always close the open connection before ending
