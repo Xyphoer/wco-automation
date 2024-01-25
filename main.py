@@ -34,7 +34,7 @@ parser.add_argument('-ce', '--checkout_emails', nargs=3,
                     help = 'Gets a list of emails for patrons from open checkouts between the two dates for the specified center.' \
                     'Format: start_date end_date center_to_consider' \
                     'Example usage: main.py -ce mm/dd/yyyy mm/dd/yyyy center')
-parser.add_argument('po', '--process-overdues', action = 'store_true',
+parser.add_argument('-po', '--process-overdues', action = 'store_true',
                     help = 'Runs the overdues repercussions script.' \
                     'Example usage: main.py -po')
 
@@ -96,12 +96,7 @@ finally:
 # create connection
 wco_connection = Connection(wco_userid, wco_password, wco_host)
 
-# createa connection to WCO
-a = wco_connection.start_session()
-print(a)
-
 try:
-    print(wco_connection.set_scope())
     if args.dupe_checkouts:
         print("Checking for duplicate checkouts across locations...\n")
 

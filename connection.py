@@ -47,10 +47,12 @@ class Connection:
     # Description: Starts the session with WCO by signing in with the provided credentials.
     #####
     def start_session(self):
-        return requests.post(url = self.host + "/rest/session/start",
+        response = requests.post(url = self.host + "/rest/session/start",
                         headers = {"Authorization": "Bearer Requested"},
                         json = {"userid": self.userid,
                                 "password": self.password})
+        return response
+
     #####
     # Name: set_scope
     # Inputs: None
@@ -95,7 +97,7 @@ class Connection:
         
         try:
             allocs = requests.post(url = self.host + "/rest/allocation/search",
-                                headers = {"authorization": "Bearer " + self.session_token},
+                                headers = {"Authorization": "Bearer " + self.session_token},
                                 json = {"properties": ["uniqueId", "patron", "patronPreferredEmail", "scheduledEndTime", "note", "itemNames"],
                                         "query": {"and": {"state": "CHECKOUT", "center": self.centers[center]}},
                                         "orderBy": "patronId"})
@@ -297,6 +299,12 @@ class Connection:
                             json = {"amount": amount,
                                     "invoice": invoice,
                                     "subtype": subtype})
+    
+    def add_invoice_note(self, invoice, text: str):
+        return requests.post(url = self.host + "/rest/invoice/addNote",
+                            headers = {"Authorization": "Bearer " + self.session_token},
+                            json = {"invoice": invoice,
+                                    "text": text})
     
     def email_invoice(self, invoice):
         return requests.post(url = self.host + "/rest/invoice/emailInvoice",
