@@ -12,8 +12,8 @@ class Overdues:
     
     ## can handle returned items and holds. Need fines still
     def update(self, start_time: str, end_time: str = '') -> dict:
-        self._process_returned_overdues(start_time, end_time)
-        self._process_fines()
+        #self._process_returned_overdues(start_time, end_time)
+        #self._process_fines()
         self._remove_holds()
         self._process_current_overdues()
     
@@ -66,9 +66,10 @@ class Overdues:
 
     # remove a specific hold
     def remove_hold(self, invoice_oid: int):
-        invoice = self.connection.get_invoice(invoice_oid).json()['payload']
+        invoice = self.connection.get_invoice(invoice_oid, ['person']).json()['payload']
         self.connection.remove_invoice_hold(invoice)  # NOTE: Works, but WCO thows 500 error if hold already gone
         self.connection.waive_invoice(invoice)
+        print(f"{invoice['person']['name']} -- {invoice['person']['userid']} -- Hold Removed")
         return
 
     def place_fee(self, invoice_oid, cost: int):
@@ -100,9 +101,11 @@ class Overdues:
                 scheduled_end = datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
                 tz = timezone(timedelta(hours=-6), name='utc-6')
                 #tz.dst = True
-                policy_start_date = datetime(year=2024, month=1, day=23, tzinfo=tz)
-                if scheduled_end < policy_start_date:
-                    scheduled_end = policy_start_date
+
+                # NOW BACKTRACKING
+                # policy_start_date = datetime(year=2024, month=1, day=23, tzinfo=tz)
+                # if scheduled_end < policy_start_date:
+                #     scheduled_end = policy_start_date
                 overdue_length = (datetime.now(tz=tz) - scheduled_end).days
 
                 allocation_types = [item['rtype'] for item in allocation['items'] if item['action'].lower() == 'checkout']

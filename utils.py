@@ -290,9 +290,11 @@ class utils:
 
         scheduled_end = datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
         tz = timezone(timedelta(hours=-6), name='utc-6')
-        policy_start_date = datetime(year=2024, month=1, day=23, tzinfo=tz)
-        if scheduled_end < policy_start_date:
-            scheduled_end = policy_start_date
+
+        # NOW BACKTRACKING
+        # policy_start_date = datetime(year=2024, month=1, day=23, tzinfo=tz)
+        # if scheduled_end < policy_start_date:
+        #     scheduled_end = policy_start_date
 
         type_buckets = {}
         for item in allocation['items']:
@@ -311,7 +313,16 @@ class utils:
 
             results.append(result.final_consequences)
         
-        return max(results), alloc_end_time, allocation['checkoutCenter']
+        final_result = results[0]
+        for result in results[1:]:
+            if result['Registrar Hold'] and not final_result['Registrar Hold']:
+                final_result = result
+            elif result['Fee'] and not final_result['Fee']:
+                final_result = result
+            elif result['Hold'] > final_result['Hold']:
+                final_result = result
+
+        return final_result, alloc_end_time, allocation['checkoutCenter']
 
     def get_checkout_emails(self, center, start_time, end_time):
         emails = []
