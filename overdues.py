@@ -39,8 +39,9 @@ class Overdues:
     # automatically sends an email based on WCO settins
     def place_hold(self, oid: int, checkout_center, allocation = None, end = None, message = '', update_db = True):
         account = self.connection.get_account(oid).json()
+        overdue_count = self.db.one(f"SELECT count FROM overdues WHERE patron_oid = {oid}")
         invoice = self.connection.create_invoice(account['payload']['defaultAccount'], account['session']['organization'], checkout_center, allocation=allocation,
-                                                 description="Invoice for violation of overdue policies: https://kb.wisc.edu/infolabs/131963").json()
+                                                 description=f"Invoice for violation of overdue policies: https://kb.wisc.edu/infolabs/131963. Previous overdue item count: {overdue_count if overdue_count else 0}").json()
         _hold = self.connection.apply_invoice_hold(invoice['payload'], message)
         invoice_oid = invoice['payload']['oid']
 
@@ -69,7 +70,7 @@ class Overdues:
         invoice = self.connection.get_invoice(invoice_oid, ['person']).json()['payload']
         self.connection.remove_invoice_hold(invoice)  # NOTE: Works, but WCO thows 500 error if hold already gone
         self.connection.waive_invoice(invoice)
-        print(f"{invoice['person']['name']} -- {invoice['person']['userid']} -- Hold Removed")
+        # print(f"{invoice['person']['name']} -- {invoice['person']['userid']} -- Hold Removed")
         return
 
     def place_fee(self, invoice_oid, cost: int):
