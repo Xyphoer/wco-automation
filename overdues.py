@@ -19,7 +19,7 @@ class Overdues:
     
     def _connect_to_db(self, db_pass) -> Postgres:
         db = Postgres(f"dbname=postgres user=postgres password={db_pass}")
-        db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, hold_length INTEGER, hold_remove_time TIMESTAMP, invoice_oid INTEGER)")
+        db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, hold_length INTEGER, hold_remove_time TIMESTAMP, invoice_oid INTEGER, registrar_hold BOOLEAN DEFAULT FALSE)")
         db.run("CREATE TABLE IF NOT EXISTS excluded_allocations (allocation_oid INTEGER PRIMARY KEY, timeout TIMESTAMP)")
         return db
     
@@ -91,6 +91,7 @@ class Overdues:
 
         current_holds = self.db.all('SELECT patron_oid FROM overdues WHERE hold_status')
         current_fines = self.db.all('SELECT patron_oid FROM overdues WHERE fee_status')
+        current_registrar_holds = self.db.all('SELECT patron_oid FROM overdues WHERE registrar_hold')
         excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations')
 
         for allocation in response.json()['payload']['result']:
@@ -123,9 +124,10 @@ class Overdues:
                         if patron_oid not in current_fines:  # only processing one checkout at a time
                             charge = allocation['aggregateValueOut'] if allocation['aggregateValueOut'] else 2000
                             self.place_fee(invoice_oid, charge)
-                        if consequences['Registrar Hold']:
+                        if consequences['Registrar Hold'] and patron_oid not in current_registrar_holds:
                             person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
                             print(f'Registrar Hold needed for: {person["name"]} - ({person["barcode"]})')
+                            self.db.run(f"UPDATE overdues SET registrar_hold = {True} WHERE patron_oid = {patron_oid}")
                     if invoice:
                         self.connection.email_invoice(invoice)
 
@@ -133,9 +135,10 @@ class Overdues:
                     invoice_oid = self.db.one(f'SELECT invoice_oid FROM overdues WHERE patron_oid={patron_oid}')
                     if invoice_oid:
                         self.remove_hold(invoice_oid)
-                        if consequences['Registrar Hold']:
+                        if consequences['Registrar Hold'] and patron_oid in current_registrar_holds:
                             person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
                             print(f'Excluded Registrar Hold Patron - Remove: {person["name"]} - ({person["barcode"]})')
+                            self.db.run(f"UPDATE overdues SET registrar_hold = {False} WHERE patron_oid = {patron_oid}")
         return
 
     # get all returned overdues and resolve hold end date, fine, or fully create if needed. -- NOTE: Need fine implement & alloc with diff return times handler
@@ -149,6 +152,7 @@ class Overdues:
 
         current_holds = self.db.all('SELECT patron_oid FROM overdues WHERE hold_status')
         current_fines = self.db.all('SELECT patron_oid, invoice_oid FROM overdues WHERE fee_status')
+        current_registrar_holds = self.db.all('SELECT patron_oid FROM overdues WHERE registrar_hold')
         excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations')
 
         response = self.connection.get_completed_overdue_allocations(start_search_time, end_search_time)
@@ -169,9 +173,9 @@ class Overdues:
                                 struck = True
                         if struck:
                             self.connection.apply_invoice_hold(invoice)
-                        if conseq['Registrar Hold']:
-                            # name = self.connection.get_patron(allocation['patron']['oid'], ['name']).json()['payload']['name']
+                        if conseq['Registrar Hold'] and allocation['patron']['oid'] in current_registrar_holds:
                             print(f"Items returned, registrar hold can be removed for oid: {allocation['patron']['oid']} -- {allocation['patron']['name']}")
+                            self.db.run(f"UPDATE overdues SET registrar_hold = {False} WHERE patron_oid = {allocation['patron']['oid']}")
 
                 # handle partial returns before due date
                 item_count = 0
