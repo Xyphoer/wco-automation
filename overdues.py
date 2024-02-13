@@ -10,13 +10,12 @@ class Overdues:
         self.utils = utilities
         self.db = self._connect_to_db(db_pass)
     
-    ## can handle returned items and holds. Need fines still
     def update(self, start_time: str, end_time: str = '') -> dict:
-        #self._process_returned_overdues(start_time, end_time)
-        #self._process_fines()
+        self._process_returned_overdues(start_time, end_time)
+        self._process_fines()
         self._remove_holds()
         self._process_current_overdues()
-    
+ 
     def _connect_to_db(self, db_pass) -> Postgres:
         db = Postgres(f"dbname=postgres user=postgres password={db_pass}")
         db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, hold_length INTEGER, hold_remove_time TIMESTAMP, invoice_oid INTEGER, registrar_hold BOOLEAN DEFAULT FALSE)")
@@ -71,7 +70,7 @@ class Overdues:
         self.connection.remove_invoice_hold(invoice)  # NOTE: Works, but WCO thows 500 error if hold already gone
         self.connection.waive_invoice(invoice)
         # print(f"{invoice['person']['name']} -- {invoice['person']['userid']} -- Hold Removed")
-        return
+        return invoice
 
     def place_fee(self, invoice_oid, cost: int):
 
@@ -220,6 +219,7 @@ class Overdues:
         # "WHEN overdues.fee_status OR EXCLUDED.fee_status " \
         #                         "THEN NULL " \
             # fee_status = overdues.fee_status OR EXCLUDED.fee_status
+        ##### HOLD LENGTH currently unreliable source of info
         try:
             if insert_query:
                 self.db.run("INSERT INTO " \
@@ -230,6 +230,7 @@ class Overdues:
                                 "UPDATE SET count = overdues.count + EXCLUDED.count, " \
                                 "hold_status = overdues.hold_status OR EXCLUDED.hold_status, " \
                                 "fee_status = EXCLUDED.fee_status, " \
+                                "hold_length = EXCLUDED.hold_length, " \
                                 "hold_remove_time = CASE " \
                                     "WHEN overdues.count = 5 " \
                                         f"THEN (EXCLUDED.hold_remove_time - (EXCLUDED.hold_length || ' days')::INTERVAL + '90 days'::INTERVAL)::TIMESTAMP " \
@@ -307,3 +308,24 @@ class Overdues:
                         "VALUES " \
                             f"{insert_query.strip()[:-1]}" \
                         "ON CONFLICT (allocation_oid) DO NOTHING")
+    
+    # check for inconsistancies between db and wco
+    def reconcile_database(self):
+        wco_open_invoices = self.connection.find_invoices(
+            query={"and": {"description": "invoice for violation of overdue policies: https://kb.wisc.edu/infolabs/131963", "isHold": True}},
+            properties=['payee']).json()['payload']['result']
+        db_open_invoices = self.db.all("SELECT patron_oid FROM overdues WHERE hold_status")
+
+        wco_open_invoices_MUTABLE = []
+        db_open_invoices_MUTABLE = db_open_invoices.copy()
+
+        for invoice in wco_open_invoices:
+            if invoice['payee']['oid'] in db_open_invoices:
+                try:
+                    db_open_invoices_MUTABLE.remove(invoice['payee']['oid'])
+                except ValueError as e:
+                    print(f"Patron: {invoice['payee']['name']} has two holds.")
+            else:
+                wco_open_invoices_MUTABLE.append(invoice['payee']['oid'])
+        
+        return wco_open_invoices_MUTABLE, db_open_invoices_MUTABLE
