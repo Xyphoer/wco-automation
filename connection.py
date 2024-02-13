@@ -14,20 +14,21 @@ class Connection:
         self.host = host
 
         # create session
-        self.current_session = self.start_session()
+        self.request_session = requests.Session()
+        self.wco_session = self.start_session()
 
         # get and store session token, which will be need for authorizing requests
-        self.session_token = self.current_session.json()['sessionToken']
+        self.session_token = self.wco_session.json()['sessionToken']
 
         # get and store checkout center information
         # Compress into just dict?
-        self.college = self.current_session.json()['payload']['roles']['operator'][1]
-        self.business = self.current_session.json()['payload']['roles']['operator'][0]
-        self.ebling = self.current_session.json()['payload']['roles']['operator'][3]
-        self.social = self.current_session.json()['payload']['roles']['operator'][7]
-        self.steenbock = self.current_session.json()['payload']['roles']['operator'][8]
-        self.memorial = self.current_session.json()['payload']['roles']['operator'][6]
-        self.merit = self.current_session.json()['payload']['roles']['operator'][5]
+        self.college = self.wco_session.json()['payload']['roles']['operator'][1]
+        self.business = self.wco_session.json()['payload']['roles']['operator'][0]
+        self.ebling = self.wco_session.json()['payload']['roles']['operator'][3]
+        self.social = self.wco_session.json()['payload']['roles']['operator'][7]
+        self.steenbock = self.wco_session.json()['payload']['roles']['operator'][8]
+        self.memorial = self.wco_session.json()['payload']['roles']['operator'][6]
+        self.merit = self.wco_session.json()['payload']['roles']['operator'][5]
         self.centers = {
             "college": self.college,
             "business": self.business,
@@ -47,7 +48,7 @@ class Connection:
     # Description: Starts the session with WCO by signing in with the provided credentials.
     #####
     def start_session(self):
-        response = requests.post(url = self.host + "/rest/session/start",
+        response = self.request_session.post(url = self.host + "/rest/session/start",
                         headers = {"Authorization": "Bearer Requested"},
                         json = {"userid": self.userid,
                                 "password": self.password})
@@ -60,7 +61,7 @@ class Connection:
     # Description: Sets the scope of the session to College Library
     #####
     def set_scope(self):
-        return requests.post(url = self.host + "/rest/session/setSessionScope",
+        return self.request_session.post(url = self.host + "/rest/session/setSessionScope",
                       headers = {"Authorization": "Bearer " + self.session_token},
                       json = {"checkoutCenter": {"_class": "checkout-center", "oid": self.college['organization']['oid']}})
     
@@ -77,7 +78,7 @@ class Connection:
 
         # get checkouts for every location
         for center in self.centers:
-            allocs = requests.post(url = self.host + "/rest/allocation/search",
+            allocs = self.request_session.post(url = self.host + "/rest/allocation/search",
                                 headers = {"Authorization": "Bearer " + self.session_token},
                                 json = {"properties": ["patron", "activeTypes", "checkoutCenter"], 
                                         "query": {"and": {"state": "CHECKOUT", "center": center}},
@@ -96,7 +97,7 @@ class Connection:
         allocs = []
         
         try:
-            allocs = requests.post(url = self.host + "/rest/allocation/search",
+            allocs = self.request_session.post(url = self.host + "/rest/allocation/search",
                                 headers = {"Authorization": "Bearer " + self.session_token},
                                 json = {"properties": ["uniqueId", "patron", "patronPreferredEmail", "scheduledEndTime", "note", "itemNames"],
                                         "query": {"and": {"state": "CHECKOUT", "center": self.centers[center]}},
@@ -120,7 +121,7 @@ class Connection:
 
         for center in self.centers:
             # get checkout information from each location
-            allocs = requests.post(url = self.host + "/rest/allocation/search",
+            allocs = self.request_session.post(url = self.host + "/rest/allocation/search",
                                 headers = {"Authorization": "Bearer " + self.session_token},
                                 json = {"properties": ["uniqueId", "patron", "realStartTime", "scheduledEndTime", "itemNames"], 
                                         "query": {"and": {"state": "CHECKOUT", "center": center}},
@@ -138,7 +139,7 @@ class Connection:
     # Description: Gets a specific checkout by it's unique CK-#### id
     #####
     def get_checkout(self, id: str):
-        return requests.post(url = self.host + "/rest/allocation/search",
+        return self.request_session.post(url = self.host + "/rest/allocation/search",
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"query": {"uniqueId": id}})
     
@@ -150,7 +151,7 @@ class Connection:
     #####
     def get_items_by_serial(self, serial: list):
         for number in serial:
-            response = requests.post(url = self.host + "/rest/resource/search",
+            response = self.request_session.post(url = self.host + "/rest/resource/search",
                         headers = {"Authorization": "Bearer " + self.session_token},
                         json = {"properties": ["uniqueId", "oid", "statusString"],
                         "query": {"serialNumber": number}})
@@ -164,17 +165,17 @@ class Connection:
     #####
     def get_patron(self, patron_oid: int, properties = []):
         if properties:
-            return requests.post(url = self.host + "/rest/person/get",
+            return self.request_session.post(url = self.host + "/rest/person/get",
                                 headers = {"Authorization": "Bearer " + self.session_token},
                                 json = {"properties": properties,
                                         "oid": patron_oid})
         else:
-            return requests.post(url = self.host + "/rest/person/get",
+            return self.request_session.post(url = self.host + "/rest/person/get",
                                 headers = {"Authorization": "Bearer " + self.session_token},
                                 json = {"oid": patron_oid})
     
     def get_account(self, patron_oid: int):
-        return requests.post(url = self.host + "/rest/person/get",
+        return self.request_session.post(url = self.host + "/rest/person/get",
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"oid": patron_oid,
                                     "properties": ["defaultAccount"]})
@@ -184,7 +185,7 @@ class Connection:
         latest_scheduled_end = (start_time - timedelta(minutes=10)).isoformat()  # 10 minute grace period
         latest_actual_end = end_time.isoformat()
 
-        return requests.post(url = self.host + "/rest/allocation/search",
+        return self.request_session.post(url = self.host + "/rest/allocation/search",
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"query": {"and": {"earliestActualEnd": earliest_actual_end, "latestScheduledEnd": latest_scheduled_end, "latestActualEnd": latest_actual_end}},
                                      "properties": ["oid", "patron", "items", "scheduledEndTime", "realEndTime", "checkoutCenter"]})
@@ -193,7 +194,7 @@ class Connection:
     def get_current_overdue_allocations(self):
         latest_scheduled_end = (datetime.now() - timedelta(minutes=10)).isoformat()  # 10 minute grace period
 
-        return requests.post(url = self.host + "/rest/allocation/search",
+        return self.request_session.post(url = self.host + "/rest/allocation/search",
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"query": {"and": {"latestScheduledEnd": latest_scheduled_end, 'state': 'CHECKOUT'}},
                                      "properties": ["oid", "patron", "items", "scheduledEndTime", "realEndTime", "checkoutCenter", "aggregateValueOut"]})
@@ -205,43 +206,43 @@ class Connection:
     # Description: Get invoice information and the corresponding patrons
     #####
     def get_open_invoices(self):
-        return requests.post(url = self.host + "/rest/invoice/search",
+        return self.request_session.post(url = self.host + "/rest/invoice/search",
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"query": {"invoiceStatus": "PENDING"},
                                      "properties": ["invoiceBalance",
                                                     "person"]})
     
     def find_invoices(self, query: dict, properties: list = []):
-        return requests.post(url = self.host + "/rest/invoice/search",
+        return self.request_session.post(url = self.host + "/rest/invoice/search",
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"query": query,
                                      "properties": properties})
     
     def get_invoice(self, invoice_oid: int, properties = []):
         if properties:
-            return requests.post(url = self.host + "/rest/invoice/get",
+            return self.request_session.post(url = self.host + "/rest/invoice/get",
                                 headers = {"Authorization": "Bearer " + self.session_token},
                                 json = {"properties": properties,
                                         "oid": invoice_oid})
         else:
-            return requests.post(url = self.host + "/rest/invoice/get",
+            return self.request_session.post(url = self.host + "/rest/invoice/get",
                                 headers = {"Authorization": "Bearer " + self.session_token},
                                 json = {"oid": invoice_oid})
     
     def get_invoice_lines(self, invoice):
-        return requests.post(url = self.host + "/rest/invoiceLine/search",
+        return self.request_session.post(url = self.host + "/rest/invoiceLine/search",
                                 headers = {"Authorization": "Bearer " + self.session_token},
                                 json = {"query": {"invoice": invoice}})
     
     def strike_invoice_line(self, invoice, line, comment = ""):
-        return requests.post(url = self.host + "/rest/invoice/strikeInvoiceLine",
+        return self.request_session.post(url = self.host + "/rest/invoice/strikeInvoiceLine",
                                 headers = {"Authorization": "Bearer " + self.session_token},
                                 json = {"invoice": invoice,
                                         "line": line,
                                         "comment": comment})
     
     def unstrike_invoice_line(self, invoice, line, comment = ""):
-        return requests.post(url = self.host + "/rest/invoice/unstrikeInvoiceLine",
+        return self.request_session.post(url = self.host + "/rest/invoice/unstrikeInvoiceLine",
                                 headers = {"Authorization": "Bearer " + self.session_token},
                                 json = {"invoice": invoice,
                                         "line": line,
@@ -255,7 +256,7 @@ class Connection:
     #              in said checkout center.
     #####
     def create_invoice(self, account, organization, center, allocation=None, description=''):
-        return requests.post(url = self.host + "/rest/invoice/new",
+        return self.request_session.post(url = self.host + "/rest/invoice/new",
                             headers = {"Authorization": "Bearer " + self.session_token},
                             json = {"account": account,
                                     "organization": organization,
@@ -264,7 +265,7 @@ class Connection:
                                     "description": description})
     
     def waive_invoice(self, invoice, comment: str = '') -> requests.Response:
-        return requests.post(url = self.host + "/rest/invoice/waiveInvoices",
+        return self.request_session.post(url = self.host + "/rest/invoice/waiveInvoices",
                             headers = {"Authorization": "Bearer " + self.session_token},
                             json = {"invoices": [invoice]})
     
@@ -274,13 +275,13 @@ class Connection:
         #                             "comment": comment})
 
     def apply_invoice_hold(self, invoice, comment: str = ''):
-        return requests.post(url = self.host + "/rest/invoice/applyHold",
+        return self.request_session.post(url = self.host + "/rest/invoice/applyHold",
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"invoice": invoice,
                                      "comment": comment})
     
     def remove_invoice_hold(self, invoice, comment: str = ''):
-        return requests.post(url = self.host + "/rest/invoice/removeHold",
+        return self.request_session.post(url = self.host + "/rest/invoice/removeHold",
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"invoice": invoice,
                                      "comment": comment})
@@ -294,20 +295,20 @@ class Connection:
     #              "Overtime", "Labor", "Shipping", or "Other."
     #####
     def add_charge(self, invoice, amount, subtype: str):
-        return requests.post(url = self.host + "/rest/invoice/addCharge",
+        return self.request_session.post(url = self.host + "/rest/invoice/addCharge",
                             headers = {"Authorization": "Bearer " + self.session_token},
                             json = {"amount": amount,
                                     "invoice": invoice,
                                     "subtype": subtype})
     
     def add_invoice_note(self, invoice, text: str):
-        return requests.post(url = self.host + "/rest/invoice/addNote",
+        return self.request_session.post(url = self.host + "/rest/invoice/addNote",
                             headers = {"Authorization": "Bearer " + self.session_token},
                             json = {"invoice": invoice,
                                     "text": text})
     
     def email_invoice(self, invoice):
-        return requests.post(url = self.host + "/rest/invoice/emailInvoice",
+        return self.request_session.post(url = self.host + "/rest/invoice/emailInvoice",
                             headers = {"Authorization": "Bearer " + self.session_token},
                             json = {"invoice": invoice})
     
@@ -318,5 +319,5 @@ class Connection:
     # Description: Logout of the WCO session
     #####
     def close(self):
-        return requests.post(url = self.host + "/rest/session/logout",
+        return self.request_session.post(url = self.host + "/rest/session/logout",
                              headers = {"Authorization": "Bearer " + self.session_token})
