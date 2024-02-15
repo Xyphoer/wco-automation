@@ -141,11 +141,9 @@ class Overdues:
         return
 
     # get all returned overdues and resolve hold end date, fine, or fully create if needed. -- NOTE: Need fine implement & alloc with diff return times handler
-    def _process_returned_overdues(self, start_search_time: str, end_search_time: str = ''): #  -> dict
+    def _process_returned_overdues(self, start_search_time: datetime, end_search_time: datetime): #  -> dict
         # update db with new overdue items for patrons (Note: only count if the checkout is completed)
         # update step: returns dictionary of changes
-        start_search_time = datetime.strptime(start_search_time, '%m/%d/%Y')
-        end_search_time = datetime.strptime(end_search_time, '%m/%d/%Y') if end_search_time else datetime.now()
         insert_dict = {}
         insert_query = ''
 
