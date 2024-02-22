@@ -20,8 +20,12 @@ class Overdues:
         db = Postgres(f"dbname=postgres user=postgres password={db_pass}")
         db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, hold_length INTEGER, hold_remove_time TIMESTAMP, invoice_oid INTEGER, registrar_hold BOOLEAN DEFAULT FALSE)")
         db.run("CREATE TABLE IF NOT EXISTS excluded_allocations (allocation_oid INTEGER PRIMARY KEY, timeout TIMESTAMP)")
+        db.run("CREATE TABLE IF NOT EXISTS history (time_ran TIMESTAMP, log_file TEXT)")
         return db
     
+    def last_run(self) -> datetime:
+        return self.db.one('SELECT time_ran FROM history ORDER BY time_ran DESC LIMIT 1')
+
     def get_patrons(self, oid: list = [], name: list = [], wiscard: list = []) -> list:
         # get patrons from database
         pass
@@ -43,6 +47,9 @@ class Overdues:
                                                  description=f"Invoice for violation of overdue policies: https://kb.wisc.edu/infolabs/131963. Previous overdue item count: {overdue_count if overdue_count else 0}").json()
         _hold = self.connection.apply_invoice_hold(invoice['payload'], message)
         invoice_oid = invoice['payload']['oid']
+
+        if not invoice_oid:
+            print(f"Failed to create invoice for patron with oid {oid}")  # should be better
 
         if update_db:
             hold_length = end - datetime.now() if end else 'NULL'
@@ -72,17 +79,20 @@ class Overdues:
         # print(f"{invoice['person']['name']} -- {invoice['person']['userid']} -- Hold Removed")
         return invoice
 
-    def place_fee(self, invoice_oid, cost: int):
+    def place_fee(self, invoice_oid: int, cost: int):
 
-        invoice = self.connection.get_invoice(invoice_oid).json()['payload']
-        self.connection.add_charge(invoice, amount=cost, subtype="Loss")
-        self.connection.email_invoice(invoice)
+        if type(invoice_oid) == int:
+            invoice = self.connection.get_invoice(invoice_oid).json()['payload']
+            self.connection.add_charge(invoice, amount=cost, subtype="Loss")
+            self.connection.email_invoice(invoice)
 
-        self.db.run("UPDATE overdues " \
-                    f"SET fee_status = {True} " \
-                    f"WHERE invoice_oid = {invoice_oid}")
+            self.db.run("UPDATE overdues " \
+                        f"SET fee_status = {True} " \
+                        f"WHERE invoice_oid = {invoice_oid}")
 
-        return invoice
+            return invoice
+        else:
+            print(f"Could not place fee with invoice_oid: {invoice_oid}")  # clean to actually use wco responses to determine
     
     # get all current overdues and apply holds (if >1day or reserve) and update DB -- DONE: NEED TEST
     def _process_current_overdues(self):
@@ -122,7 +132,9 @@ class Overdues:
                     if consequences['Fee']:
                         if patron_oid not in current_fines:  # only processing one checkout at a time
                             charge = allocation['aggregateValueOut'] if allocation['aggregateValueOut'] else 2000
-                            self.place_fee(invoice_oid, charge)
+                            fee_placed = self.place_fee(invoice_oid, charge)
+                            if not fee_placed:
+                                print(f"No fee placed on person with oid:{patron_oid}")
                         if consequences['Registrar Hold'] and patron_oid not in current_registrar_holds:
                             person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
                             print(f'Registrar Hold needed for: {person["name"]} - ({person["barcode"]})')
@@ -147,6 +159,7 @@ class Overdues:
         insert_dict = {}
         insert_query = ''
 
+        self.db.run(f"INSERT INTO history (time_ran) VALUES ('{end_search_time.isoformat()}')")
         current_holds = self.db.all('SELECT patron_oid FROM overdues WHERE hold_status')
         current_fines = self.db.all('SELECT patron_oid, invoice_oid FROM overdues WHERE fee_status')
         current_registrar_holds = self.db.all('SELECT patron_oid FROM overdues WHERE registrar_hold')
@@ -298,7 +311,7 @@ class Overdues:
         allocation_list = allocations.split()
         insert_query = ""
         for allocation in allocation_list:
-            insert_query += "(" + str(self.connection.get_checkout(id=allocation).json()['payload']['result'][0]['oid']) + ")," + '\n'
+            insert_query += "(" + str(self.connection.get_checkout(id=allocation if not allocation.isdigit() else 'CK-' + allocation).json()['payload']['result'][0]['oid']) + ")," + '\n'
         
         if insert_query:
             self.db.run("INSERT INTO " \

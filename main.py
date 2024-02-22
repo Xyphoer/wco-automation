@@ -179,10 +179,11 @@ try:
         utils.get_checkout_emails(start_time=args.checkout_emails[0], end_time=args.checkout_emails[1], center=args.checkout_emails[2])
     
     if args.process_overdues:
-        overdues_correct_date_range = ' '
-        while overdues_correct_date_range.lower()[0] != 'y':
+        overdues_correct_date_range = ''
+        oconn = Overdues(wco_connection, utils(wco_connection), postgres_pass)
+        while overdues_correct_date_range.lower()[:1] != 'y':
             overdues_start = input("Overdues Start Date (mm/dd/yyyy): ")
-            overdues_start_dt = datetime.strptime(overdues_start, '%m/%d/%Y')
+            overdues_start_dt = datetime.strptime(overdues_start, '%m/%d/%Y') if '/' in overdues_start else oconn.last_run()
             overdues_end = input("Overdues End Date: ")
             overdues_end_dt = datetime.strptime(overdues_end, '%m/%d/%Y') if '/' in overdues_end else datetime.now()
             overdues_start_end_diff = overdues_end_dt - overdues_start_dt
@@ -190,7 +191,6 @@ try:
         
         print(f"Processing overdues with start date {overdues_start}, end date {overdues_end if overdues_end else 'Now'}...")
 
-        oconn = Overdues(wco_connection, utils(wco_connection), postgres_pass)
         oconn.excluded_allocations(input("Excluded allocations (whitespace seperation): "))
         oconn.update(overdues_start_dt, overdues_end_dt)
 
