@@ -1,12 +1,14 @@
 from connection import Connection
+from redmine import Texting
 from postgres import Postgres
 from datetime import datetime, timedelta, timezone
 from utils import utils, Repercussions
 
 class Overdues:
 
-    def __init__(self, connection: Connection, utilities: utils, db_pass):
+    def __init__(self, connection: Connection, utilities: utils, texting: Texting, db_pass):
         self.connection = connection
+        self.texting = texting
         self.utils = utilities
         self.db = self._connect_to_db(db_pass)
     
@@ -127,12 +129,24 @@ class Overdues:
                     if patron_oid not in current_holds:  # only processing one checkout at a time
                         invoice = self.place_hold(patron_oid, center)
                         invoice_oid = invoice['oid']
+
+                        try:
+                            self.texting.add_checkout(allocation['checkoutCenter']['name'], allocation)
+                        except Exception as e:
+                            print(e)
+
                     else:
                         invoice_oid = self.db.one(f'SELECT invoice_oid FROM overdues WHERE patron_oid={patron_oid}')
                     if consequences['Fee']:
                         if patron_oid not in current_fines:  # only processing one checkout at a time
                             charge = allocation['aggregateValueOut'] if allocation['aggregateValueOut'] else 2000
                             fee_placed = self.place_fee(invoice_oid, charge)
+
+                            try:
+                                self.texting.add_checkout(allocation['checkoutCenter']['name'], allocation)
+                            except Exception as e:
+                                print(e)
+
                             if not fee_placed:
                                 print(f"No fee placed on person with oid:{patron_oid}")
                         if consequences['Registrar Hold'] and patron_oid not in current_registrar_holds:
@@ -150,6 +164,9 @@ class Overdues:
                             person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
                             print(f'Excluded Registrar Hold Patron - Remove: {person["name"]} - ({person["barcode"]})')
                             self.db.run(f"UPDATE overdues SET registrar_hold = {False} WHERE patron_oid = {patron_oid}")
+        
+        self.texting.ticketify()
+
         return
 
     # get all returned overdues and resolve hold end date, fine, or fully create if needed. -- NOTE: Need fine implement & alloc with diff return times handler
