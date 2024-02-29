@@ -78,6 +78,7 @@ class Overdues:
         invoice = self.connection.get_invoice(invoice_oid, ['person']).json()['payload']
         self.connection.remove_invoice_hold(invoice)  # NOTE: Works, but WCO thows 500 error if hold already gone
         self.connection.waive_invoice(invoice)
+        self.connection.email_invoice(invoice)
         # print(f"{invoice['person']['name']} -- {invoice['person']['userid']} -- Hold Removed")
         return invoice
 
