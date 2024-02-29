@@ -341,6 +341,42 @@ class Overdues:
                             f"{insert_query.strip()[:-1]}" \
                         "ON CONFLICT (allocation_oid) DO NOTHING")
     
+    # balance invoice and overdues databases
+    # reconciling hold_length, hold_remove_time, hold_status, fee_status, and registrar_hold
+    # count should always be up to date in overdues
+    def balance_databases(self, patron_oid: int = None):
+        # balance one patron's info between databases
+        update_query = ""
+        if patron_oid:
+            current_overdue_status = self.db.one("SELECT * FROM overdues WHERE patron_oid = %(oid)i", oid=patron_oid)
+            current_invoice_status = self.db.all(f"SELECT * FROM invoices WHERE invoice_oid IN ({current_overdue_status.invoice_oids})")
+
+            # reconcile hold_length
+            pass # decide if extending hold length or overlapping
+
+            # reconcile hold_remove_time
+            pass # function of hold_length & current overdues essentially, relies on same decision
+
+            # reconcile hold_status
+            if current_overdue_status.hold_status and True not in (record.hold_status for record in current_invoice_status):
+                update_query += f"hold_status = {False}, "
+            elif not current_overdue_status.hold_status and True in (record.hold_status for record in current_invoice_status):
+                update_query += f"hold_status = {True}, "
+
+            # reconcile fee_status
+            if current_overdue_status.fee_status and True not in (record.fee_status for record in current_invoice_status):
+                update_query += f"fee_status = {False}, "
+            elif not current_overdue_status.fee_status and True in (record.fee_status for record in current_invoice_status):
+                update_query += f"fee_status = {True}, "
+            
+            # reconcile registrar_hold
+            if current_overdue_status.registrar_hold and True not in (record.registrar_hold for record in current_invoice_status):
+                update_query += f"registrar_hold = {False}, "
+            elif not current_overdue_status.registrar_hold and True in (record.registrar_hold for record in current_invoice_status):
+                update_query += f"registrar_hold = {True}, "
+            
+            self.db.run("UPDATE overdues SET %(query)s WHERE patron_oid = %(oid)i", query=update_query, oid=patron_oid)
+
     # check for inconsistancies between db and wco
     def reconcile_database(self):
         wco_open_invoices = self.connection.find_invoices(
