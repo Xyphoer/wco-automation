@@ -59,9 +59,9 @@ class Overdues:
 
             if end:
                 self.db.run("INSERT INTO " \
-                                "overdues (patron_oid, hold_status, hold_length, hold_remove_time, invoice_oid)" \
+                                "invoices (invoice_oid, count, hold_status, hold_length, hold_remove_time, ck_oid)" \
                             "VALUES " \
-                                f"({oid}, True, {hold_length}, {end}, {invoice_oid})" \
+                                f"({invoice_oid}, NULL, True, {hold_length}, {end}, NULL)" \
                             "ON CONFLICT (patron_oid) DO " \
                                 f"UPDATE SET hold_status = True, hold_length = {hold_length}, hold_remove_time = {end}, invoice_oid = {invoice_oid}")
             else:
@@ -71,6 +71,8 @@ class Overdues:
                                 f"({oid}, True, {invoice_oid})" \
                             "ON CONFLICT (patron_oid) DO " \
                                 f"UPDATE SET hold_status = True, invoice_oid = {invoice_oid}")
+            # insert/update overdues table with overall info
+            self.db.run("INSERT INTO overdues")
         
         return invoice['payload']
 
