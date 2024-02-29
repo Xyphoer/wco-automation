@@ -165,7 +165,10 @@ class Overdues:
                             print(f'Excluded Registrar Hold Patron - Remove: {person["name"]} - ({person["barcode"]})')
                             self.db.run(f"UPDATE overdues SET registrar_hold = {False} WHERE patron_oid = {patron_oid}")
         
-        self.texting.ticketify()
+        try:
+            self.texting.ticketify()
+        except Exception as e:
+            print(e)
 
         return
 

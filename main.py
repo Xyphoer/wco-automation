@@ -1,5 +1,5 @@
 from connection import Connection
-from redmine import RedmineConnection
+from redmine import RedmineConnection, Texting
 from utils import *
 from overdues import Overdues
 import argparse
@@ -180,7 +180,8 @@ try:
     
     if args.process_overdues:
         overdues_correct_date_range = ''
-        oconn = Overdues(wco_connection, utils(wco_connection), postgres_pass)
+        texting = Texting(wco_connection, redmine_host, shibsession_cookie_name, shibsession_cookie_value, redmine_session_cookie, redmine_auth_key)
+        oconn = Overdues(wco_connection, utils(wco_connection), texting, postgres_pass)
         while overdues_correct_date_range.lower()[:1] != 'y':
             overdues_start = input("Overdues Start Date (mm/dd/yyyy): ")
             overdues_start_dt = datetime.strptime(overdues_start, '%m/%d/%Y') if '/' in overdues_start else oconn.last_run()

@@ -253,7 +253,7 @@ class Texting(RedmineConnection):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.location_checkout_pairs = []
+        self.location_checkout_pairs = {}
         self.location_options = self.wco_connection.centers.keys()
 
     def add_checkout(self, location, checkout):
