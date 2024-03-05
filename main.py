@@ -4,6 +4,7 @@ from utils import *
 from overdues import Overdues
 import argparse
 from datetime import datetime
+import webbrowser
 
 # set up argparse
 parser = argparse.ArgumentParser(prog = "WCO Automation",
@@ -95,10 +96,9 @@ finally:
     if not redmine_host:
         redmine_host = input("redmine host: ")
     if not shibsession_cookie_name:
+        webbrowser.open('https://redmine.library.wisc.edu')
         wco_userid = input("shibsession cookie name: ")
     if not shibsession_cookie_value:
-        import webbrowser
-        webbrowser.open('https://redmine.library.wisc.edu')
         wco_password = input("shibsession cookie value: ")
     if not redmine_session_cookie:
         redmine_host = input("redmine session cookie: ")
