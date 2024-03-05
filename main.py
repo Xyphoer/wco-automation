@@ -92,6 +92,22 @@ finally:
         wco_userid = input("WebCheckout user id: ")
     if not wco_password:
         wco_password = input("WebCheckout password: ")
+    if not redmine_host:
+        redmine_host = input("redmine host: ")
+    if not shibsession_cookie_name:
+        wco_userid = input("shibsession cookie name: ")
+    if not shibsession_cookie_value:
+        import webbrowser
+        webbrowser.open('https://redmine.library.wisc.edu')
+        wco_password = input("shibsession cookie value: ")
+    if not redmine_session_cookie:
+        redmine_host = input("redmine session cookie: ")
+    if not redmine_auth_key:
+        wco_userid = input("redmine auth key: ")
+    if not project_query_ext:
+        project_query_ext = input("project query ext: ")
+    if not postgres_pass:
+        postgres_pass = input("postgres password: ")
 
 
 # create connection
