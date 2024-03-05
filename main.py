@@ -52,6 +52,7 @@ redmine_auth_key = ''
 shibsession_cookie_name = ''
 shibsession_cookie_value = ''
 project_query_ext = ''
+postgres_pass = ''
 
 try:
     with open('config.txt', 'r', encoding='utf-8') as in_file:
