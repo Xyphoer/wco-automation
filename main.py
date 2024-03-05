@@ -98,13 +98,13 @@ finally:
         redmine_host = input("redmine host: ")
     if not shibsession_cookie_name:
         webbrowser.open('https://redmine.library.wisc.edu')
-        wco_userid = input("shibsession cookie name: ")
+        shibsession_cookie_name = input("shibsession cookie name: ")
     if not shibsession_cookie_value:
-        wco_password = input("shibsession cookie value: ")
+        shibsession_cookie_value = input("shibsession cookie value: ")
     if not redmine_session_cookie:
-        redmine_host = input("redmine session cookie: ")
+        redmine_session_cookie = input("redmine session cookie: ")
     if not redmine_auth_key:
-        wco_userid = input("redmine auth key: ")
+        redmine_auth_key = input("redmine auth key: ")
     if not project_query_ext:
         project_query_ext = input("project query ext: ")
     if not postgres_pass:
