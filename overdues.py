@@ -25,7 +25,7 @@ class Overdues:
         db = None
 
         # hardcoded db address, add configuralable to config later
-        chdir('""C:/Program Files/PostgreSQL/16/bin""')
+        chdir('"C:/Program Files/PostgreSQL/16/bin"')
         response = system('pg_ctl status -D "C:/Program Files/PostgreSQL/16/data"')
         if response != 0: # is not running == 3
             start = system('pg_ctl start -w -D "C:/Program Files/PostgreSQL/16/data"')
