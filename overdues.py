@@ -74,12 +74,17 @@ class Overdues:
         return invoice['payload']
 
     # remove a specific hold
-    def remove_hold(self, invoice_oid: int):
+    def remove_hold(self, invoice_oid: int, update_db = False):
         invoice = self.connection.get_invoice(invoice_oid, ['person']).json()['payload']
         self.connection.remove_invoice_hold(invoice)  # NOTE: Works, but WCO thows 500 error if hold already gone
         self.connection.waive_invoice(invoice)
         self.connection.email_invoice(invoice)
         # print(f"{invoice['person']['name']} -- {invoice['person']['userid']} -- Hold Removed")
+        if update_db:
+            self.db.run("UPDATE overdues " \
+                        f"SET hold_status = {False}, fee_status = {False}, registrar_hold = {False} " \
+                        f"WHERE invoide_oid = {invoice_oid}")
+
         return invoice
 
     def place_fee(self, invoice_oid: int, cost: int):
@@ -107,64 +112,62 @@ class Overdues:
         excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations')
 
         for allocation in response.json()['payload']['result']:
+            center = allocation['checkoutCenter']
+            patron_oid = allocation['patron']['oid']
 
-            if allocation['oid'] not in excluded_checkouts:
-                center = allocation['checkoutCenter']
-                patron_oid = allocation['patron']['oid']
+            scheduled_end = datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+            tz = timezone(timedelta(hours=-6), name='utc-6')
+            #tz.dst = True
 
-                scheduled_end = datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
-                tz = timezone(timedelta(hours=-6), name='utc-6')
-                #tz.dst = True
+            # NOW BACKTRACKING
+            # policy_start_date = datetime(year=2024, month=1, day=23, tzinfo=tz)
+            # if scheduled_end < policy_start_date:
+            #     scheduled_end = policy_start_date
+            overdue_length = (datetime.now(tz=tz) - scheduled_end).days
 
-                # NOW BACKTRACKING
-                # policy_start_date = datetime(year=2024, month=1, day=23, tzinfo=tz)
-                # if scheduled_end < policy_start_date:
-                #     scheduled_end = policy_start_date
-                overdue_length = (datetime.now(tz=tz) - scheduled_end).days
+            allocation_types = [item['rtype'] for item in allocation['items'] if item['action'].lower() == 'checkout']
+            consequences = Repercussions(overdue_length, allocation_types).update()
 
-                allocation_types = [item['rtype'] for item in allocation['items'] if item['action'].lower() == 'checkout']
-                consequences = Repercussions(overdue_length, allocation_types).update()
+            if consequences['Hold'] and allocation['oid'] not in excluded_checkouts:
+                invoice = False
+                if patron_oid not in current_holds:  # only processing one checkout at a time
+                    invoice = self.place_hold(patron_oid, center)
+                    invoice_oid = invoice['oid']
 
-                if consequences['Hold'] and allocation['oid'] not in excluded_checkouts:
-                    invoice = False
-                    if patron_oid not in current_holds:  # only processing one checkout at a time
-                        invoice = self.place_hold(patron_oid, center)
-                        invoice_oid = invoice['oid']
+                    try:
+                        self.texting.add_checkout(allocation['checkoutCenter']['name'], allocation)
+                    except Exception as e:
+                        print(e)
+
+                else:
+                    invoice_oid = self.db.one(f'SELECT invoice_oid FROM overdues WHERE patron_oid={patron_oid}')
+                if consequences['Fee']:
+                    if patron_oid not in current_fines:  # only processing one checkout at a time
+                        charge = allocation['aggregateValueOut'] if allocation['aggregateValueOut'] else 2000
+                        fee_placed = self.place_fee(invoice_oid, charge)
 
                         try:
                             self.texting.add_checkout(allocation['checkoutCenter']['name'], allocation)
                         except Exception as e:
                             print(e)
 
-                    else:
-                        invoice_oid = self.db.one(f'SELECT invoice_oid FROM overdues WHERE patron_oid={patron_oid}')
-                    if consequences['Fee']:
-                        if patron_oid not in current_fines:  # only processing one checkout at a time
-                            charge = allocation['aggregateValueOut'] if allocation['aggregateValueOut'] else 2000
-                            fee_placed = self.place_fee(invoice_oid, charge)
+                        if not fee_placed:
+                            print(f"No fee placed on person with oid:{patron_oid}")
+                    if consequences['Registrar Hold'] and patron_oid not in current_registrar_holds:
+                        person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
+                        print(f'Registrar Hold needed for: {person["name"]} - ({person["barcode"]})')
+                        self.db.run(f"UPDATE overdues SET registrar_hold = {True} WHERE patron_oid = {patron_oid}")
+                if invoice:
+                    self.connection.email_invoice(invoice)
 
-                            try:
-                                self.texting.add_checkout(allocation['checkoutCenter']['name'], allocation)
-                            except Exception as e:
-                                print(e)
-
-                            if not fee_placed:
-                                print(f"No fee placed on person with oid:{patron_oid}")
-                        if consequences['Registrar Hold'] and patron_oid not in current_registrar_holds:
-                            person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
-                            print(f'Registrar Hold needed for: {person["name"]} - ({person["barcode"]})')
-                            self.db.run(f"UPDATE overdues SET registrar_hold = {True} WHERE patron_oid = {patron_oid}")
-                    if invoice:
-                        self.connection.email_invoice(invoice)
-
-                elif allocation['oid'] in excluded_checkouts:
-                    invoice_oid = self.db.one(f'SELECT invoice_oid FROM overdues WHERE patron_oid={patron_oid}')
-                    if invoice_oid:
-                        self.remove_hold(invoice_oid)
-                        if consequences['Registrar Hold'] and patron_oid in current_registrar_holds:
-                            person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
-                            print(f'Excluded Registrar Hold Patron - Remove: {person["name"]} - ({person["barcode"]})')
-                            self.db.run(f"UPDATE overdues SET registrar_hold = {False} WHERE patron_oid = {patron_oid}")
+            elif allocation['oid'] in excluded_checkouts:
+                invoice_oid = self.db.one(f'SELECT invoice_oid FROM overdues WHERE patron_oid={patron_oid}')
+                if invoice_oid:
+                    self.remove_hold(invoice_oid)
+                    if consequences['Registrar Hold'] and patron_oid in current_registrar_holds:
+                        person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
+                        print(f'Excluded Registrar Hold Patron - Remove: {person["name"]} - ({person["barcode"]})')
+                        self.db.run(f"UPDATE overdues SET registrar_hold = {False} WHERE patron_oid = {patron_oid}")
         
         try:
             self.texting.ticketify()
@@ -189,9 +192,9 @@ class Overdues:
         response = self.connection.get_completed_overdue_allocations(start_search_time, end_search_time)
 
         for allocation in response.json()['payload']['result']:
-            if allocation['oid'] not in excluded_checkouts:
-                conseq, end_time, checkout_center = self.utils.get_overdue_consequence(allocation)
+            conseq, end_time, checkout_center = self.utils.get_overdue_consequence(allocation)
 
+            if allocation['oid'] not in excluded_checkouts:
                 # If they have a fine, remove it as they returned the item
                 for entry in current_fines:
                     if allocation['patron']['oid'] == entry[0]:
@@ -231,6 +234,14 @@ class Overdues:
                                                                 conseq['Hold'],                         # hold_length
                                                                 f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time
                                                                 checkout_center]    # checkout center for hold
+            elif allocation['oid'] in excluded_checkouts:
+                invoice_oid = self.db.one(f'SELECT invoice_oid FROM overdues WHERE patron_oid={allocation['patron']['oid']}')
+                if invoice_oid:
+                    self.remove_hold(invoice_oid)
+                    if conseq['Registrar Hold'] and allocation['patron']['oid'] in current_registrar_holds:
+                        person = self.connection.get_patron(allocation['patron']['oid'], ['barcode']).json()['payload']
+                        print(f'Excluded Registrar Hold Patron - Remove: {person["name"]} - ({person["barcode"]})')
+                        self.db.run(f"UPDATE overdues SET registrar_hold = {False} WHERE patron_oid = {allocation['patron']['oid']}")
 
         for key, value in insert_dict.items():
             invoice_oid = False
