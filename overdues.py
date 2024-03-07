@@ -3,6 +3,7 @@ from redmine import Texting
 from postgres import Postgres
 from datetime import datetime, timedelta, timezone
 from utils import utils, Repercussions
+from os import system, chdir
 
 class Overdues:
 
@@ -19,10 +20,23 @@ class Overdues:
         self._process_current_overdues()
  
     def _connect_to_db(self, db_pass) -> Postgres:
-        db = Postgres(f"dbname=postgres user=postgres password={db_pass}")
-        db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, hold_length INTEGER, hold_remove_time TIMESTAMP, invoice_oid INTEGER, registrar_hold BOOLEAN DEFAULT FALSE)")
-        db.run("CREATE TABLE IF NOT EXISTS excluded_allocations (allocation_oid INTEGER PRIMARY KEY, timeout TIMESTAMP)")
-        db.run("CREATE TABLE IF NOT EXISTS history (time_ran TIMESTAMP, log_file TEXT)")
+        # check if db running
+        response, start = -1, -1
+        db = None
+
+        # hardcoded db address, add configuralable to config later
+        chdir('""C:/Program Files/PostgreSQL/16/bin""')
+        response = system('pg_ctl status -D "C:/Program Files/PostgreSQL/16/data"')
+        if response != 0: # is not running == 3
+            start = system('pg_ctl start -w -D "C:/Program Files/PostgreSQL/16/data"')
+            if start != 0: # failed to start
+                raise OSError('Failed to connected to database at "C:/Program Files/PostgreSQL/16/data"')
+        
+        if response == 0 or start == 0:
+            db = Postgres(f"dbname=postgres user=postgres password={db_pass}")
+            db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, hold_length INTEGER, hold_remove_time TIMESTAMP, invoice_oid INTEGER, registrar_hold BOOLEAN DEFAULT FALSE)")
+            db.run("CREATE TABLE IF NOT EXISTS excluded_allocations (allocation_oid INTEGER PRIMARY KEY, timeout TIMESTAMP)")
+            db.run("CREATE TABLE IF NOT EXISTS history (time_ran TIMESTAMP, log_file TEXT)")
         return db
     
     def last_run(self) -> datetime:
