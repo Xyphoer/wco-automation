@@ -179,7 +179,7 @@ class Dos:
 
                 for row in reader:
                     if row[1] == 'Stalled' and 'Overdue' in row[4]:
-                        match = re.search('(CK- *\d+)+', row[7])
+                        match = re.search(r'(CK- *\d+)+', row[7])
                         if (match):
                             for group in match.groups():
                                 allocations.append((row[0], group.replace(" ", "")))

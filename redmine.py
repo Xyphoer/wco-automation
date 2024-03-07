@@ -33,7 +33,7 @@ class RedmineConnection:
             
             if "overdue" in issue['subject'].lower() and "contact log" in issue['subject'].lower() and "dos" not in issue['subject'].lower():
 
-                regex = re.compile("CK- *\d+")
+                regex = re.compile(r"CK- *\d+")
                 checkouts = regex.findall(issue['description'])
 
                 changes = {checkout: {'return': False, 'renew': False} for checkout in checkouts}
@@ -118,7 +118,7 @@ class RedmineConnection:
                         if number_pos != -1:
                             end_pos = follow_up_ticket['description'].find('\n', number_pos)
 
-                            number = "".join(re.findall('\d+', follow_up_ticket['description'][number_pos:end_pos]))
+                            number = "".join(re.findall(r'\d+', follow_up_ticket['description'][number_pos:end_pos]))
                             if len(number) == 11:   # remove 1 from +1 if present
                                 number = number[1:]
 
@@ -169,10 +169,10 @@ class RedmineConnection:
 
                     if checkout['note']:
                         #phone_numbers.append("+1" + phone.match(allocation['note']).group())
-                        phone_number = "+1" + "".join(re.findall('\d+', checkout['note']))
+                        phone_number = "+1" + "".join(re.findall(r'\d+', checkout['note']))
                         phone_numbers.append(phone_number[0:12] if len(phone_number) > 12 else phone_number)
                     else:
-                        phone_number = "+1" + "".join(re.findall('\d+', input(f"Phone Number for {checkout['uniqueId']} - {checkout['patron']['name']}: ")))
+                        phone_number = "+1" + "".join(re.findall(r'\d+', input(f"Phone Number for {checkout['uniqueId']} - {checkout['patron']['name']}: ")))
                         phone_numbers.append(phone_number[0:12] if len(phone_number) > 12 else phone_number)
                         if not phone_number:
                             phone_numbers.append(f"{checkout['uniqueId']} - {checkout['patron']['name']} - No phone number found")
@@ -207,7 +207,7 @@ class RedmineConnection:
                                     if number_pos != -1:
                                         end_pos = curr_ticket['issue']['description'].find('\n', number_pos)
 
-                                        number = "".join(re.findall('\d+', curr_ticket['issue']['description'][number_pos:end_pos]))
+                                        number = "".join(re.findall(r'\d+', curr_ticket['issue']['description'][number_pos:end_pos]))
                                         if len(number) == 11:   # remove 1 from +1 if present
                                             number = number[1:]
 
@@ -274,10 +274,10 @@ class Texting(RedmineConnection):
 
                     if checkout['note']:
                         #phone_numbers.append("+1" + phone.match(allocation['note']).group())
-                        phone_number = "+1" + "".join(re.findall('\d+', checkout['note']))
+                        phone_number = "+1" + "".join(re.findall(r'\d+', checkout['note']))
                         phone_numbers.append(phone_number[0:12] if len(phone_number) > 12 else phone_number)
                     else:
-                        phone_number = "+1" + "".join(re.findall('\d+', input(f"Phone Number for {checkout['uniqueId']} - {checkout['patron']['name']}: ")))
+                        phone_number = "+1" + "".join(re.findall(r'\d+', input(f"Phone Number for {checkout['uniqueId']} - {checkout['patron']['name']}: ")))
                         phone_numbers.append(phone_number[0:12] if len(phone_number) > 12 else phone_number)
                         if not phone_number:
                             phone_numbers.append(f"{checkout['uniqueId']} - {checkout['patron']['name']} - No phone number found")
@@ -312,7 +312,7 @@ class Texting(RedmineConnection):
                                     if number_pos != -1:
                                         end_pos = curr_ticket['issue']['description'].find('\n', number_pos)
 
-                                        number = "".join(re.findall('\d+', curr_ticket['issue']['description'][number_pos:end_pos]))
+                                        number = "".join(re.findall(r'\d+', curr_ticket['issue']['description'][number_pos:end_pos]))
                                         if len(number) == 11:   # remove 1 from +1 if present
                                             number = number[1:]
 
