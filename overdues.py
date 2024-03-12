@@ -14,10 +14,15 @@ class Overdues:
         self.db = self._connect_to_db(db_pass)
     
     def update(self, start_time: str, end_time: str = '') -> dict:
+        print("Processing returned overdues...")    # basic logging
         self._process_returned_overdues(start_time, end_time)
+        print("Processing current fines...")
         self._process_fines()
+        print("Processing current holds...")
         self._remove_holds()
+        print("Processing current overdues...")
         self._process_current_overdues()
+        print("Complete.")
  
     def _connect_to_db(self, db_pass) -> Postgres:
         # check if db running
@@ -183,6 +188,8 @@ class Overdues:
                         print(f'Excluded Registrar Hold Patron - Remove: {person["name"]} - ({person["barcode"]})')
                         self.db.run(f"UPDATE overdues SET registrar_hold = {False} WHERE patron_oid = {patron_oid}")
         
+        print("Holds done, attempting redmine/texting...") # basic logging
+
         try:
             self.texting.ticketify()
         except Exception as e:
