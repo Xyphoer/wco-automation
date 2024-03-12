@@ -257,13 +257,16 @@ class Texting(RedmineConnection):
         self.location_checkout_pairs = {key:[] for key in self.location_options}
 
     def add_checkout(self, location, checkout):
-        self.location_checkout_pairs[location.lower()].append(checkout)
+        # try to resolve incorrectly formatted locations
+        if location not in self.location_options:
+            location = ''.join(location.split()[:-1]).lower() # usually formatted with " Library" which should be removed.
+        self.location_checkout_pairs[location].append(checkout)
 
     # sketchy
     def ticketify(self):
         time_now = datetime.now()
-        if center in ['college', 'memorial']:
-            for center in self.location_checkout_pairs:
+        for center in self.location_checkout_pairs:
+            if center in ['college', 'memorial']:
                 print(f"---{center}---\n")
 
                 phone_numbers = []
