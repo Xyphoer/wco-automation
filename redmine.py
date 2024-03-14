@@ -339,7 +339,7 @@ class Texting(RedmineConnection):
                                         json={'issue': {'project_id': self.project_id,
                                                         'status_id': 10, # resolved
                                                         'custom_fields': [{"value": center.title(), "id": self.custom_field['id']}],
-                                                        'subject': f"Overdue {', '.join(checkout.split(' - ')[-1] for checkout in checkout['itemNames'])} - Contact Log\n",
+                                                        'subject': f"Overdue {', '.join([item['resource']['name'] for item in checkout['items'] if item['realReturnTime'] == None])} - Contact Log\n",
                                                         'description': issue_description}})
                         
                         #print(new_ticket.json())
