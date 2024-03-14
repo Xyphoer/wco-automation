@@ -182,7 +182,7 @@ class Overdues:
             elif allocation['oid'] in excluded_checkouts:
                 invoice_oid = self.db.one(f'SELECT invoice_oid FROM overdues WHERE patron_oid={patron_oid}')
                 if invoice_oid:
-                    self.remove_hold(invoice_oid)
+                    self.remove_hold(invoice_oid, update_db=True)
                     if consequences['Registrar Hold'] and patron_oid in current_registrar_holds:
                         person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
                         print(f'Excluded Registrar Hold Patron - Remove: {person["name"]} - ({person["barcode"]})')
@@ -258,7 +258,7 @@ class Overdues:
             elif allocation['oid'] in excluded_checkouts:
                 invoice_oid = self.db.one(f'SELECT invoice_oid FROM overdues WHERE patron_oid={allocation['patron']['oid']}')
                 if invoice_oid:
-                    self.remove_hold(invoice_oid)
+                    self.remove_hold(invoice_oid, update_db=True)
                     if conseq['Registrar Hold'] and allocation['patron']['oid'] in current_registrar_holds:
                         person = self.connection.get_patron(allocation['patron']['oid'], ['barcode']).json()['payload']
                         print(f'Excluded Registrar Hold Patron - Remove: {person["name"]} - ({person["barcode"]})')
