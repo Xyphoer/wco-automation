@@ -282,7 +282,7 @@ class Texting(RedmineConnection):
                     else:
                         phone_number = "+1" + "".join(re.findall(r'\d+', input(f"Phone Number for {checkout['uniqueId']} - {checkout['patron']['name']}: ")))
                         phone_numbers.append(phone_number[0:12] if len(phone_number) > 12 else phone_number)
-                        if not phone_number:
+                        if phone_number == '+1':
                             phone_numbers.append(f"{checkout['uniqueId']} - {checkout['patron']['name']} - No phone number found")
 
                     # check for open tickets
