@@ -20,8 +20,8 @@ class Overdues:
  
     def _connect_to_db(self, db_pass) -> Postgres:
         db = Postgres(f"dbname=postgres user=postgres password={db_pass}")
-        db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, hold_length INTEGER, hold_remove_time TIMESTAMP, invoice_oid INTEGER, registrar_hold BOOLEAN DEFAULT FALSE)")
-        db.run("CREATE TABLE IF NOT EXISTS invoices (invoice_oid INTEGER PRIMARY KEY, count INTEGER, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, registrar_hold BOOLEAN DEFAULT FALSE, hold_length INTEGER, hold_remove_time TIMESTAMP, ck_oid INTEGER)")
+        db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, hold_length INTEGER DEFAULT 0, hold_remove_time TIMESTAMP, invoice_oids INTEGER[], registrar_hold BOOLEAN DEFAULT FALSE)")
+        db.run("CREATE TABLE IF NOT EXISTS invoices (invoice_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, registrar_hold BOOLEAN DEFAULT FALSE, hold_length INTEGER DEFAULT 0, hold_remove_time TIMESTAMP, ck_oid INTEGER, patron_oid INTEGER)")
         db.run("CREATE TABLE IF NOT EXISTS excluded_allocations (allocation_oid INTEGER PRIMARY KEY, timeout TIMESTAMP)")
         db.run("CREATE TABLE IF NOT EXISTS history (time_ran TIMESTAMP, log_file TEXT)")
         return db
@@ -55,15 +55,22 @@ class Overdues:
             print(f"Failed to create invoice for patron with oid {oid}")  # should be better
 
         if update_db:
-            hold_length = end - datetime.now() if end else 'NULL'
+            hold_length = end - datetime.now() if end else 0
 
             if end:
                 self.db.run("INSERT INTO " \
-                                "invoices (invoice_oid, count, hold_status, hold_length, hold_remove_time, ck_oid)" \
+                                "invoices (invoice_oid, hold_status, hold_length, hold_remove_time, ck_oid)" \
                             "VALUES " \
-                                f"({invoice_oid}, NULL, True, {hold_length}, {end}, NULL)" \
-                            "ON CONFLICT (patron_oid) DO " \
-                                f"UPDATE SET hold_status = True, hold_length = {hold_length}, hold_remove_time = {end}, invoice_oid = {invoice_oid}")
+                                f"({invoice_oid}, True, {hold_length}, {end}, {allocation['oid']})" \
+                            "ON CONFLICT (invoice_oid) DO " \
+                                f"UPDATE SET hold_status = True, hold_length = {hold_length}, hold_remove_time = {end}, invoice_oid = {invoice_oid}, ck_oid = {allocation['oid']}")
+                
+                self.db.run("INSERT INTO " \
+                                "overdues (patron_oid, hold_status, hold_length, hold_remove_time, invoice_oids)" \
+                            "VALUES " \
+                                f"({oid}, {True}, {hold_length}, {end}, {{{invoice_oid}}}) " \
+                            "ON CONFICT (patron_oid) DO " \
+                                f"UPDATE SET hold_status = True, hold_length = overdues.hold_length + EXCLUDED.hold_length, hold_remove_time = , ") # Decide how to process in mtg
             else:
                 self.db.run("INSERT INTO " \
                                 "overdues (patron_oid, hold_status, invoice_oid)" \
