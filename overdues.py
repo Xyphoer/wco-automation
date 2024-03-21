@@ -334,7 +334,7 @@ class Overdues:
                     print(f"Patron oid: {patron_oid} -- paid fine -- {name} -- Return & Delete item")
 
                     date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
-                    db_update += f"({patron_oid}, '{date_paid + timedelta(days=hold_length)}'),\n"
+                    db_update += f"({patron_oid}, '{date_paid + timedelta(days=hold_length)}'::timestamp),\n"
                     #db_update.append((patron_oid, date_paid + timedelta(days=hold_length)))   # NOTE: if fine on second overdue of overlapping, uses first length. NOT IDEAL (fallback anything though - all paid fines should be returned)
                 # if not invoice['isHold']: # decide methodology (place_hold creates invoice... Seperate functions? or just hold stuff here) -- Note: Should not come into play, backup for if staff removes hold. Update path.
                 elif not invoice:
