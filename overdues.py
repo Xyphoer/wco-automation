@@ -345,7 +345,7 @@ class Overdues:
         if db_update:   # NOTE: if has current overdue time does not preserve/take greatest, overwrites.
             self.db.run(f"UPDATE overdues SET " \
                             "hold_remove_time = batch.hold_remove_time " \
-                        f"FROM (VALUES ({db_update.strip()[:-1]})) AS batch(patron_oid, hold_remove_time) " \
+                        f"FROM (VALUES {db_update.strip()[:-1]}) AS batch(patron_oid, hold_remove_time) " \
                         "WHERE overdues.patron_oid = batch.patron_oid")
 
     # remove holds on patrons who have reached the designated time of removal. DONE
