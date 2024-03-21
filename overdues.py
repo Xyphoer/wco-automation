@@ -357,10 +357,11 @@ class Overdues:
                 self.remove_hold(invoice_oid)
                 holds_removed.append(f"({patron_oid})")
         if holds_removed:
-            self.db.run(f"UPDATE overdues SET " \
+            update_str = f"UPDATE overdues SET " \
                         f"hold_status = {False}, hold_remove_time = NULL::timestamp, invoice_oid = NULL " \
-                        f"FROM (VALUES ({', '.join(holds_removed)})) AS batch(patron_oid) " \
-                        "WHERE overdues.patron_oid = batch.patron_oid")
+                        f"FROM (VALUES {', '.join(holds_removed)}) AS batch(patron_oid) " \
+                        "WHERE overdues.patron_oid = batch.patron_oid"
+            self.db.run(update_str)
     
     def excluded_allocations(self, allocations: str):
         allocation_list = allocations.split()
