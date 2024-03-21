@@ -340,7 +340,7 @@ class Overdues:
                 elif not invoice:
                     print(f"invoice with oid: {invoice_oid} doesn't seem to exist.")
             except KeyError as e:
-                print(patron_oid + " : " + invoice_oid + " : " + invoice)
+                print(f"patron_oid: {patron_oid}\ninvoice_oid: {invoice_oid}\nresponse: {invoice}")
 
         if db_update:   # NOTE: if has current overdue time does not preserve/take greatest, overwrites.
             self.db.run(f"UPDATE overdues SET " \
