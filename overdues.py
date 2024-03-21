@@ -324,7 +324,7 @@ class Overdues:
     # NOTE: still open $0.00 holds count as 'Paid' not 'Pending' thus are not open. (Still can have hold). Staff can 'strike' charges when they are paid.
     def _process_fines(self):
         fined_patrons = self.db.all('SELECT patron_oid, hold_length, invoice_oid FROM overdues WHERE fee_status')
-        db_update = []
+        db_update = ""
 
         for patron_oid, hold_length, invoice_oid in fined_patrons:
             invoice = self.connection.get_invoice(invoice_oid, ['datePaid', 'isHold']).json()['payload']
@@ -334,17 +334,18 @@ class Overdues:
                     print(f"Patron oid: {patron_oid} -- paid fine -- {name} -- Return & Delete item")
 
                     date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
-                    db_update.append((patron_oid, date_paid + timedelta(days=hold_length)))   # NOTE: if fine on second overdue of overlapping, uses first length. NOT IDEAL (fallback anything though - all paid fines should be returned)
+                    db_update += f"({patron_oid}, {date_paid + timedelta(days=hold_length)}),\n"
+                    #db_update.append((patron_oid, date_paid + timedelta(days=hold_length)))   # NOTE: if fine on second overdue of overlapping, uses first length. NOT IDEAL (fallback anything though - all paid fines should be returned)
                 # if not invoice['isHold']: # decide methodology (place_hold creates invoice... Seperate functions? or just hold stuff here) -- Note: Should not come into play, backup for if staff removes hold. Update path.
                 elif not invoice:
                     print(f"invoice with oid: {invoice_oid} doesn't seem to exist.")
             except KeyError as e:
-                print(invoice)
+                print(patron_oid + " : " + invoice_oid + " : " + invoice)
 
         if db_update:   # NOTE: if has current overdue time does not preserve/take greatest, overwrites.
             self.db.run(f"UPDATE overdues SET " \
                             "hold_remove_time = batch.hold_remove_time " \
-                        f"FROM (VALUES ({', '.join(db_update)})) AS batch(patron_oid, hold_remove_time) " \
+                        f"FROM (VALUES ({db_update.strip()[:-1]})) AS batch(patron_oid, hold_remove_time) " \
                         "WHERE overdues.patron_oid = batch.patron_oid")
 
     # remove holds on patrons who have reached the designated time of removal. DONE
