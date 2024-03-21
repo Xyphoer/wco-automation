@@ -328,7 +328,7 @@ class Overdues:
 
         for patron_oid, hold_length, invoice_oid in fined_patrons:
             invoice = self.connection.get_invoice(invoice_oid, ['datePaid', 'isHold']).json()['payload']
-            if invoice['datePaid']:
+            if invoice and invoice['datePaid']:
 
                 name = self.connection.get_patron(patron_oid, ['name']).json()['payload']['name']
                 print(f"Patron oid: {patron_oid} -- paid fine -- {name} -- Return & Delete item")
@@ -336,7 +336,9 @@ class Overdues:
                 date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
                 db_update.append((patron_oid, date_paid + timedelta(days=hold_length)))   # NOTE: if fine on second overdue of overlapping, uses first length. NOT IDEAL (fallback anything though - all paid fines should be returned)
             # if not invoice['isHold']: # decide methodology (place_hold creates invoice... Seperate functions? or just hold stuff here) -- Note: Should not come into play, backup for if staff removes hold. Update path.
-        
+            elif not invoice:
+                print(f"invoice with oid: {invoice_oid} doesn't seem to exist.")
+
         if db_update:   # NOTE: if has current overdue time does not preserve/take greatest, overwrites.
             self.db.run(f"UPDATE overdues SET " \
                             "hold_remove_time = batch.hold_remove_time " \
