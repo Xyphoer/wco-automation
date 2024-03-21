@@ -328,16 +328,18 @@ class Overdues:
 
         for patron_oid, hold_length, invoice_oid in fined_patrons:
             invoice = self.connection.get_invoice(invoice_oid, ['datePaid', 'isHold']).json()['payload']
-            if invoice and invoice['datePaid']:
+            try:  # need better error handling for wco errors in general
+                if invoice and invoice['datePaid']:
+                    name = self.connection.get_patron(patron_oid, ['name']).json()['payload']['name']
+                    print(f"Patron oid: {patron_oid} -- paid fine -- {name} -- Return & Delete item")
 
-                name = self.connection.get_patron(patron_oid, ['name']).json()['payload']['name']
-                print(f"Patron oid: {patron_oid} -- paid fine -- {name} -- Return & Delete item")
-
-                date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
-                db_update.append((patron_oid, date_paid + timedelta(days=hold_length)))   # NOTE: if fine on second overdue of overlapping, uses first length. NOT IDEAL (fallback anything though - all paid fines should be returned)
-            # if not invoice['isHold']: # decide methodology (place_hold creates invoice... Seperate functions? or just hold stuff here) -- Note: Should not come into play, backup for if staff removes hold. Update path.
-            elif not invoice:
-                print(f"invoice with oid: {invoice_oid} doesn't seem to exist.")
+                    date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
+                    db_update.append((patron_oid, date_paid + timedelta(days=hold_length)))   # NOTE: if fine on second overdue of overlapping, uses first length. NOT IDEAL (fallback anything though - all paid fines should be returned)
+                # if not invoice['isHold']: # decide methodology (place_hold creates invoice... Seperate functions? or just hold stuff here) -- Note: Should not come into play, backup for if staff removes hold. Update path.
+                elif not invoice:
+                    print(f"invoice with oid: {invoice_oid} doesn't seem to exist.")
+            except KeyError as e:
+                print(invoice)
 
         if db_update:   # NOTE: if has current overdue time does not preserve/take greatest, overwrites.
             self.db.run(f"UPDATE overdues SET " \
