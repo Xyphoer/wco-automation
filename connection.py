@@ -33,7 +33,7 @@ class Connection:
             "college": self.college,
             "business": self.business,
             "ebling": self.ebling,
-            "social": self.social,
+            "socialwork": self.social,
             "steenbock": self.steenbock,
             "memorial": self.memorial,
             "merit": self.merit}

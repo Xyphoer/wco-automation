@@ -156,7 +156,7 @@ class Overdues:
                     try:
                         self.texting.add_checkout(allocation['checkoutCenter']['name'], allocation)
                     except Exception as e:
-                        print(e)
+                        print("Error adding checkout to texting:", e)
 
                 else:
                     invoice_oid = self.db.one(f'SELECT invoice_oid FROM overdues WHERE patron_oid={patron_oid}')
@@ -168,7 +168,7 @@ class Overdues:
                         try:
                             self.texting.add_checkout(allocation['checkoutCenter']['name'], allocation)
                         except Exception as e:
-                            print(e)
+                            print("Error adding checkout to texting:", e)
 
                         if not fee_placed:
                             print(f"No fee placed on person with oid:{patron_oid}")
