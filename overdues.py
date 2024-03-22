@@ -130,6 +130,11 @@ class Overdues:
         current_registrar_holds = self.db.all('SELECT patron_oid FROM overdues WHERE registrar_hold')
         excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations')
 
+        # rudamentary blocking of multiple holds on one person for multiple checkouts going overdue at once
+        # Note: will process each fine individually (i.e. add 1 for each and email twice), same w/ texting
+        # --temporarily acceptible
+        already_processed = {}
+
         for allocation in response.json()['payload']['result']:
             center = allocation['checkoutCenter']
             patron_oid = allocation['patron']['oid']
@@ -150,8 +155,14 @@ class Overdues:
             if consequences['Hold'] and allocation['oid'] not in excluded_checkouts:
                 invoice = False
                 if patron_oid not in current_holds:  # only processing one checkout at a time
-                    invoice = self.place_hold(patron_oid, center)
-                    invoice_oid = invoice['oid']
+
+                    # rudamentary blocking of multiple holds
+                    if patron_oid not in already_processed:
+                        invoice = self.place_hold(patron_oid, center)
+                        invoice_oid = invoice['oid']
+                        already_processed[patron_oid] = invoice_oid
+                    else:
+                        invoice_oid = already_processed[patron_oid]
 
                     try:
                         self.texting.add_checkout(allocation['checkoutCenter']['name'], allocation)
