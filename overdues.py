@@ -409,4 +409,4 @@ class Overdues:
             else:
                 wco_open_invoices_MUTABLE.append(invoice['payee']['oid'])
         
-        return wco_open_invoices_MUTABLE, db_open_invoices_MUTABLE
+        return wco_open_invoices_MUTABLE, db_open_invoices_MUTABLE # wco_only patron_oids with overdue invoices, db_only patron_oids with overdue invoices
