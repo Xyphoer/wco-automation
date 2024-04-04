@@ -102,7 +102,7 @@ class Overdues:
         if update_db:
             self.db.run("UPDATE overdues " \
                         f"SET hold_status = {False}, fee_status = {False}, registrar_hold = {False} " \
-                        f"WHERE invoide_oid = {invoice_oid}")
+                        f"WHERE invoice_oid = {invoice_oid}")
 
         return invoice
 
