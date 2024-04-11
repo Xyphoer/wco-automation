@@ -59,20 +59,26 @@ class Overdues:
 
             if end:
                 # perhaps edit overdues table first (add overdue length), return the new hold_remove_time from that, which is now the hold remove time of the invoice table
+                with self.db.get_cursor() as cursor:
+                    cursor.run("INSERT INTO " \
+                                    "overdues (patron_oid, hold_status, hold_length, hold_remove_time, invoice_oids)" \
+                                "VALUES " \
+                                    "(%(oid)s, %(hold_s)s, CAST('%(hold_l)sD' AS INTERVAL), CAST(%(hold_rtime)s AS TIMESTAMP), %(i_id)s) " \
+                                "ON CONFLICT (patron_oid) DO " \
+                                    "UPDATE SET hold_status = True, hold_length = overdues.hold_length + EXCLUDED.hold_length, " \
+                                        "hold_remove_time = overdues.hold_remove_time + EXCLUDED.hold_length, invoice_oids = overdues.invoice_oids || %(i_id)s "\
+                                "RETURNING hold_remove_time", oid=oid, hold_s=True, hold_l=hold_length, hold_rtime=end, i_id=str({invoice_oid}))
+                    back_hold_remove_time = cursor.fetchone()[0] # gives datetime.datetime object
+
+                ##
                 self.db.run("INSERT INTO " \
                                 "invoices (invoice_oid, hold_status, hold_length, hold_remove_time, ck_oid)" \
                             "VALUES " \
                                 f"({invoice_oid}, True, CAST('{hold_length}D' AS INTERVAL), {end}, {allocation['oid']})" \
                             "ON CONFLICT (invoice_oid) DO " \
                                 f"UPDATE SET hold_status = True, hold_length = {hold_length}, hold_remove_time = {end}, invoice_oid = {invoice_oid}, ck_oid = {allocation['oid']}")
-                
-                self.db.run("INSERT INTO " \
-                                "overdues (patron_oid, hold_status, hold_length, hold_remove_time, invoice_oids)" \
-                            "VALUES " \
-                                f"({oid}, {True}, {hold_length}, {end}, {{{invoice_oid}}}) " \
-                            "ON CONFICT (patron_oid) DO " \
-                                f"UPDATE SET hold_status = True, hold_length = overdues.hold_length + EXCLUDED.hold_length, " \
-                                    "hold_remove_time = overdues.hold_remove_time + (overdues), ") # Decide how to process in mtg (timestamp + (timestamp - timestamp)<-[interval] = timestamp)
+            # For no end, process same. 0D will be added to interval and to hold_remove_time. Invoice table entry will have 0 day and no hold_remove_time. Add to overall when returned.
+            # Also, keep hold_status/fee_status = true even if hold_length is 0 and hold_remove_time is NULL. Only remove when all invoice oids have been removed.
             else:
                 self.db.run("INSERT INTO " \
                                 "overdues (patron_oid, hold_status, invoice_oid)" \
