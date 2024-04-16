@@ -21,7 +21,7 @@ class Overdues:
     def _connect_to_db(self, db_pass) -> Postgres:
         db = Postgres(f"dbname=postgres user=postgres password={db_pass}")
         db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, hold_length INTERVAL DEFAULT CAST('0' AS INTERVAL), hold_remove_time TIMESTAMP, invoice_oids INTEGER[], registrar_hold BOOLEAN DEFAULT FALSE)")
-        db.run("CREATE TABLE IF NOT EXISTS invoices (invoice_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, registrar_hold BOOLEAN DEFAULT FALSE, hold_length INTEGER DEFAULT 0, hold_remove_time TIMESTAMP, ck_oid INTEGER, patron_oid INTEGER)")
+        db.run("CREATE TABLE IF NOT EXISTS invoices (invoice_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, registrar_hold BOOLEAN DEFAULT FALSE, hold_length INTERVAL DEFAULT CAST('0' AS INTERVAL), hold_remove_time TIMESTAMP, ck_oid INTEGER, patron_oid INTEGER, waived BOOLEAN DEFAULT FALSE)")
         db.run("CREATE TABLE IF NOT EXISTS excluded_allocations (allocation_oid INTEGER PRIMARY KEY, timeout TIMESTAMP)")
         db.run("CREATE TABLE IF NOT EXISTS history (time_ran TIMESTAMP, log_file TEXT)")
         return db
@@ -50,12 +50,15 @@ class Overdues:
                                                  description=f"Invoice for violation of overdue policies: https://kb.wisc.edu/infolabs/131963. Previous overdue item count: {overdue_count if overdue_count else 0}").json()
         _hold = self.connection.apply_invoice_hold(invoice['payload'], message)
         invoice_oid = invoice['payload']['oid']
+        ck_oid = allocation['oid'] if allocation else None
 
         if not invoice_oid:
             print(f"Failed to create invoice for patron with oid {oid}")  # should be better
 
         if update_db:
-            hold_length = end - datetime.now() if end else 0
+            # get length of hold in float of days
+            diff = end - datetime.now()
+            hold_length = (diff.days if diff.days > 0 else 0) + round(diff.seconds / 60 / 60 / 24, 3) if end else 0
 
             if end:
                 # perhaps edit overdues table first (add overdue length), return the new hold_remove_time from that, which is now the hold remove time of the invoice table
@@ -66,28 +69,37 @@ class Overdues:
                                     "(%(oid)s, %(hold_s)s, CAST('%(hold_l)sD' AS INTERVAL), CAST(%(hold_rtime)s AS TIMESTAMP), %(i_id)s) " \
                                 "ON CONFLICT (patron_oid) DO " \
                                     "UPDATE SET hold_status = True, hold_length = overdues.hold_length + EXCLUDED.hold_length, " \
-                                        "hold_remove_time = overdues.hold_remove_time + EXCLUDED.hold_length, invoice_oids = overdues.invoice_oids || %(i_id)s "\
+                                        "hold_remove_time = overdues.hold_remove_time + EXCLUDED.hold_length, invoice_oids = overdues.invoice_oids || EXCLUDED.invoice_oids "\
                                 "RETURNING hold_remove_time", oid=oid, hold_s=True, hold_l=hold_length, hold_rtime=end, i_id=str({invoice_oid}))
-                    back_hold_remove_time = cursor.fetchone()[0] # gives datetime.datetime object
-
-                ##
+                    back_hold_remove_time = cursor.fetchone()[0] # gives datetime.datetime object for extended hold_remove time of sequential invoices
+                
                 self.db.run("INSERT INTO " \
-                                "invoices (invoice_oid, hold_status, hold_length, hold_remove_time, ck_oid)" \
+                                "invoices (invoice_oid, hold_status, hold_length, hold_remove_time, ck_oid, patron_oid)" \
                             "VALUES " \
-                                f"({invoice_oid}, True, CAST('{hold_length}D' AS INTERVAL), {end}, {allocation['oid']})" \
+                                "(%(i_id)s, %(hold_s)s, CAST('%(hold_l)sD' AS INTERVAL), CAST(%(hold_rtime)s AS TIMESTAMP), %(c_id)s, %(oid)s) " \
                             "ON CONFLICT (invoice_oid) DO " \
-                                f"UPDATE SET hold_status = True, hold_length = {hold_length}, hold_remove_time = {end}, invoice_oid = {invoice_oid}, ck_oid = {allocation['oid']}")
+                                "UPDATE SET hold_status = EXCLUDED.hold_status, hold_length = EXCLUDED.hold_length, " \
+                                    "hold_remove_time = EXCLUDED.hold_remove_time, ck_oid = EXCLUDED.ck_oid, patron_oid = EXCLUDED.patron_oid",
+                            i_id = invoice_oid, hold_s=True, hold_l=hold_length, hold_rtime=end, c_id = ck_oid, oid=oid)
+
             # For no end, process same. 0D will be added to interval and to hold_remove_time. Invoice table entry will have 0 day and no hold_remove_time. Add to overall when returned.
             # Also, keep hold_status/fee_status = true even if hold_length is 0 and hold_remove_time is NULL. Only remove when all invoice oids have been removed.
             else:
                 self.db.run("INSERT INTO " \
-                                "overdues (patron_oid, hold_status, invoice_oid)" \
+                                "overdues (patron_oid, hold_status, invoice_oids)" \
                             "VALUES " \
-                                f"({oid}, True, {invoice_oid})" \
+                                "(%(oid)s, %(hold_s)s, %(i_id)s) " \
                             "ON CONFLICT (patron_oid) DO " \
-                                f"UPDATE SET hold_status = True, invoice_oid = {invoice_oid}")
-            # insert/update overdues table with overall info
-            self.db.run("INSERT INTO overdues")
+                                "UPDATE SET hold_status = EXCLUDED.hold_status, invoice_oids = overdues.invoice_oids || EXCLUDED.invoice_oids "\
+                            "RETURNING hold_remove_time", oid=oid, hold_s=True, i_id=str({invoice_oid}))
+                
+                self.db.run("INSERT INTO " \
+                                "invoices (invoice_oid, hold_status, ck_oid, patron_oid)" \
+                            "VALUES " \
+                                "(%(i_id)s, %(hold_s)s, %(c_id)s, %(oid)s) " \
+                            "ON CONFLICT (invoice_oid) DO " \
+                                "UPDATE SET hold_status = EXCLUDED.hold_status, ck_oid = EXCLUDED.ck_oid, patron_oid = EXCLUDED.patron_oid",
+                            i_id = invoice_oid, hold_s=True, c_id = ck_oid, oid=oid)
         
         return invoice['payload']
 
