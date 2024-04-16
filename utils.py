@@ -285,7 +285,7 @@ class utils:
         
         return results
     
-    def get_overdue_consequence(self, allocation) -> (dict, datetime, dict):
+    def get_overdue_consequence(self, allocation) -> tuple[dict, datetime, dict]:
         alloc_end_time = datetime.strptime(allocation['realEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
 
         scheduled_end = datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
