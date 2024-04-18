@@ -264,6 +264,12 @@ class Connection:
                                     "checkoutCenter": center,
                                     "description": description})
     
+    def update_invoice(self, invoice_oid: int, update_dict: dict):
+        return self.request_session.post(url = self.host + "/rest/invoice/update",
+                                         headers = {"Authorization": "Bearer " + self.session_token},
+                                         json = {'oid': invoice_oid,
+                                                 'values': update_dict})
+    
     def waive_invoice(self, invoice, comment: str = '') -> requests.Response:
         return self.request_session.post(url = self.host + "/rest/invoice/waiveInvoices",
                             headers = {"Authorization": "Bearer " + self.session_token},

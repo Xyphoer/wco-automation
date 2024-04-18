@@ -46,10 +46,12 @@ class Overdues:
     def place_hold(self, oid: int, checkout_center, allocation = None, end = None, message = '', update_db = True):
         account = self.connection.get_account(oid).json()
         overdue_count = self.db.one(f"SELECT count FROM overdues WHERE patron_oid = {oid}")
-        invoice = self.connection.create_invoice(account['payload']['defaultAccount'], account['session']['organization'], checkout_center, allocation=allocation,
-                                                 description=f"Invoice for violation of overdue policies: https://kb.wisc.edu/infolabs/131963. Previous overdue item count: {overdue_count if overdue_count else 0}").json()
-        _hold = self.connection.apply_invoice_hold(invoice['payload'], message)
+        #invoice = self.connection.create_invoice(account['payload']['defaultAccount'], account['session']['organization'], checkout_center, allocation=allocation,
+        #                                         description=f"Invoice for violation of overdue policies: https://kb.wisc.edu/infolabs/131963. Previous overdue item count: {overdue_count if overdue_count else 0}").json()
+        invoice = self.connection.get_invoice(170348753).json()
         invoice_oid = invoice['payload']['oid']
+        invoice = self.connection.update_invoice(invoice_oid, {"dueDate": None}).json()
+        _hold = self.connection.apply_invoice_hold(invoice['payload'], message)
         ck_oid = allocation['oid'] if allocation else None
 
         if not invoice_oid:
