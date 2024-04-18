@@ -20,7 +20,7 @@ class Overdues:
  
     def _connect_to_db(self, db_pass) -> Postgres:
         db = Postgres(f"dbname=postgres user=postgres password={db_pass}")
-        db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, hold_length INTERVAL DEFAULT CAST('0' AS INTERVAL), hold_remove_time TIMESTAMP, invoice_oids INTEGER[], registrar_hold BOOLEAN DEFAULT FALSE)")
+        db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_count INTEGER DEFAULT 0, fee_count INTEGER DEFAULT 0, hold_length INTERVAL DEFAULT CAST('0' AS INTERVAL), hold_remove_time TIMESTAMP, invoice_oids INTEGER[], registrar_hold_count INTEGER DEFAULT 0)")
         db.run("CREATE TABLE IF NOT EXISTS invoices (invoice_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, registrar_hold BOOLEAN DEFAULT FALSE, hold_length INTERVAL DEFAULT CAST('0' AS INTERVAL), hold_remove_time TIMESTAMP, ck_oid INTEGER, patron_oid INTEGER, waived BOOLEAN DEFAULT FALSE)")
         db.run("CREATE TABLE IF NOT EXISTS excluded_allocations (allocation_oid INTEGER PRIMARY KEY, timeout TIMESTAMP)")
         db.run("CREATE TABLE IF NOT EXISTS history (time_ran TIMESTAMP, log_file TEXT)")
@@ -65,13 +65,13 @@ class Overdues:
                 # perhaps edit overdues table first (add overdue length), return the new hold_remove_time from that, which is now the hold remove time of the invoice table
                 with self.db.get_cursor() as cursor:
                     cursor.run("INSERT INTO " \
-                                    "overdues (patron_oid, hold_status, hold_length, hold_remove_time, invoice_oids)" \
+                                    "overdues (patron_oid, hold_count, hold_length, hold_remove_time, invoice_oids)" \
                                 "VALUES " \
-                                    "(%(oid)s, %(hold_s)s, CAST('%(hold_l)sD' AS INTERVAL), CAST(%(hold_rtime)s AS TIMESTAMP), %(i_id)s) " \
+                                    "(%(oid)s, 1, CAST('%(hold_l)sD' AS INTERVAL), CAST(%(hold_rtime)s AS TIMESTAMP), %(i_id)s) " \
                                 "ON CONFLICT (patron_oid) DO " \
-                                    "UPDATE SET hold_status = True, hold_length = overdues.hold_length + EXCLUDED.hold_length, " \
+                                    "UPDATE SET hold_count = overdues.hold_count + 1, hold_length = overdues.hold_length + EXCLUDED.hold_length, " \
                                         "hold_remove_time = overdues.hold_remove_time + EXCLUDED.hold_length, invoice_oids = overdues.invoice_oids || EXCLUDED.invoice_oids "\
-                                "RETURNING hold_remove_time", oid=oid, hold_s=True, hold_l=hold_length, hold_rtime=end, i_id=str({invoice_oid}))
+                                "RETURNING hold_remove_time", oid=oid, hold_l=hold_length, hold_rtime=end, i_id=str({invoice_oid}))
                     back_hold_remove_time = cursor.fetchone()[0] # gives datetime.datetime object for extended hold_remove time of sequential invoices
                 
                 self.db.run("INSERT INTO " \
@@ -87,12 +87,12 @@ class Overdues:
             # Also, keep hold_status/fee_status = true even if hold_length is 0 and hold_remove_time is NULL. Only remove when all invoice oids have been removed.
             else:
                 self.db.run("INSERT INTO " \
-                                "overdues (patron_oid, hold_status, invoice_oids)" \
+                                "overdues (patron_oid, hold_count, invoice_oids)" \
                             "VALUES " \
-                                "(%(oid)s, %(hold_s)s, %(i_id)s) " \
+                                "(%(oid)s, 1, %(i_id)s) " \
                             "ON CONFLICT (patron_oid) DO " \
-                                "UPDATE SET hold_status = EXCLUDED.hold_status, invoice_oids = overdues.invoice_oids || EXCLUDED.invoice_oids "\
-                            "RETURNING hold_remove_time", oid=oid, hold_s=True, i_id=str({invoice_oid}))
+                                "UPDATE SET hold_count = overdues.hold_count + 1, invoice_oids = overdues.invoice_oids || EXCLUDED.invoice_oids "\
+                            "RETURNING hold_remove_time", oid=oid, i_id=str({invoice_oid}))
                 
                 self.db.run("INSERT INTO " \
                                 "invoices (invoice_oid, hold_status, ck_oid, patron_oid)" \
@@ -124,8 +124,8 @@ class Overdues:
                         "SET fee_status = True " \
                         "WHERE invoice_oid = %(i_id)s", i_id = invoice_oid)
             self.db.run("UPDATE overdues " \
-                        "SET fee_status = True " \
-                        "WHERE patron_oid = %(oid)s AND fee_status = False", oid=invoice['patron']['oid'])
+                        "SET fee_count = fee_count + 1 " \
+                        "WHERE patron_oid = %(oid)s", oid=invoice['patron']['oid'])
 
             return invoice
         else:
