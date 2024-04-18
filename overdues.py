@@ -116,13 +116,16 @@ class Overdues:
     def place_fee(self, invoice_oid: int, cost: int):
 
         if type(invoice_oid) == int:
-            invoice = self.connection.get_invoice(invoice_oid).json()['payload']
-            self.connection.add_charge(invoice, amount=cost, subtype="Loss")
+            invoice = self.connection.get_invoice(invoice_oid, properties=['patron']).json()['payload']
+            self.connection.add_charge(invoice, amount=cost, subtype="Loss", text="Overdue - Lost fee - to be removed upon return")
             self.connection.email_invoice(invoice)
-
+                
+            self.db.run("UPDATE invoices " \
+                        "SET fee_status = True " \
+                        "WHERE invoice_oid = %(i_id)s", i_id = invoice_oid)
             self.db.run("UPDATE overdues " \
-                        f"SET fee_status = {True} " \
-                        f"WHERE invoice_oid = {invoice_oid}")
+                        "SET fee_status = True " \
+                        "WHERE patron_oid = %(oid)s AND fee_status = False", oid=invoice['patron']['oid'])
 
             return invoice
         else:

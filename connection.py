@@ -300,12 +300,13 @@ class Connection:
     #              Subtype must be one of "Abuse Fine", "Late Fine", "Loss", "Damage", "Usage Fee", "Supplies",
     #              "Overtime", "Labor", "Shipping", or "Other."
     #####
-    def add_charge(self, invoice, amount, subtype: str):
+    def add_charge(self, invoice, amount, subtype: str, text: str = ''):
         return self.request_session.post(url = self.host + "/rest/invoice/addCharge",
                             headers = {"Authorization": "Bearer " + self.session_token},
                             json = {"amount": amount,
                                     "invoice": invoice,
-                                    "subtype": subtype})
+                                    "subtype": subtype,
+                                    "text": text})
     
     def add_invoice_note(self, invoice, text: str):
         return self.request_session.post(url = self.host + "/rest/invoice/addNote",
