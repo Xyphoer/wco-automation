@@ -20,6 +20,7 @@ class Overdues:
  
     def _connect_to_db(self, db_pass) -> Postgres:
         db = Postgres(f"dbname=postgres user=postgres password={db_pass}")
+        db.run("CREATE EXTENSION IF NOT EXISTS intarray") # required for subracting array of ints from array of ints
         db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_count INTEGER DEFAULT 0, fee_count INTEGER DEFAULT 0, hold_length INTERVAL DEFAULT CAST('0' AS INTERVAL), hold_remove_time TIMESTAMP, invoice_oids INTEGER[], registrar_hold_count INTEGER DEFAULT 0)")
         db.run("CREATE TABLE IF NOT EXISTS invoices (invoice_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, registrar_hold BOOLEAN DEFAULT FALSE, hold_length INTERVAL DEFAULT CAST('0' AS INTERVAL), hold_remove_time TIMESTAMP, ck_oid INTEGER, patron_oid INTEGER, waived BOOLEAN DEFAULT FALSE)")
         db.run("CREATE TABLE IF NOT EXISTS excluded_allocations (allocation_oid INTEGER PRIMARY KEY, timeout TIMESTAMP)")
@@ -43,6 +44,7 @@ class Overdues:
 
     # (Turn into place_invoice and have hold & fine?) place hold and update db. NOTE: Done -- This does not update overdue count, just the hold status.
     # automatically sends an email based on WCO settins
+    # On new - by checkout - process
     def place_hold(self, oid: int, checkout_center, allocation = None, end = None, message = '', update_db = True):
         account = self.connection.get_account(oid).json()
         overdue_count = self.db.one(f"SELECT count FROM overdues WHERE patron_oid = {oid}")
@@ -113,11 +115,12 @@ class Overdues:
         # print(f"{invoice['person']['name']} -- {invoice['person']['userid']} -- Hold Removed")
         return invoice
 
+    # On new - by checkout - process
     def place_fee(self, invoice_oid: int, cost: int):
 
         if type(invoice_oid) == int:
             invoice = self.connection.get_invoice(invoice_oid, properties=['patron']).json()['payload']
-            self.connection.add_charge(invoice, amount=cost, subtype="Loss", text="Overdue - Lost fee - to be removed upon return")
+            self.connection.add_charge(invoice, amount=cost, subtype="Loss", text="")
             self.connection.email_invoice(invoice)
                 
             self.db.run("UPDATE invoices " \
@@ -345,22 +348,38 @@ class Overdues:
                         f"FROM (VALUES ({', '.join(db_update)})) AS batch(patron_oid, hold_remove_time) " \
                         "WHERE overdues.patron_oid = batch.patron_oid")
 
-    # remove holds on patrons who have reached the designated time of removal. DONE
+    # remove holds on patrons who have reached the designated time of removal.
+    # On new - by checkout - process
     def _remove_holds(self):
         now = datetime.now()
-        holds_removed = []
+        holds_removed = {}
+        invoice_oids = []
 
-        potential_holds = self.db.all('SELECT patron_oid, hold_remove_time, invoice_oid FROM overdues WHERE hold_status')
+        potential_holds = self.db.all('SELECT patron_oid, hold_length, hold_remove_time, invoice_oid FROM invoices WHERE hold_status AND NOT waived')
 
-        for patron_oid, hold_remove_time, invoice_oid in potential_holds:
+        for patron_oid, hold_length, hold_remove_time, invoice_oid in potential_holds:
             if hold_remove_time and hold_remove_time < now:
                 self.remove_hold(invoice_oid)
-                holds_removed.append(f"({patron_oid})")
+                invoice_oids.append(invoice_oid)
+                if patron_oid in holds_removed:
+                    holds_removed[patron_oid]['amount'] += 1
+                    holds_removed[patron_oid]['length'] += hold_length
+                    holds_removed[patron_oid]['invoices'].append(invoice_oid)
+                else:
+                    holds_removed[patron_oid] = {'amount': 1, 'length': hold_length, 'invoices': [invoice_oid]}
+        
         if holds_removed:
-            self.db.run(f"UPDATE overdues SET " \
-                        f"hold_status = {False}, hold_remove_time = NULL::timestamp, invoice_oid = NULL " \
-                        f"FROM (VALUES ({', '.join(holds_removed)})) AS batch(patron_oid) " \
-                        "WHERE overdues.patron_oid = batch.patron_oid")
+            self.db.run("UPDATE overdues SET " \
+                            "hold_count = overdues.hold_count - batch.hold_amount, hold_length = overdues.hold_length - batch.hold_length, " \
+                            "hold_remove_time = NULL:timestamp, invoice_oids = overdues.invoice_oids - batch.invoice_oids "\
+                        "FROM (VALUES " \
+                                    "%(insert_str)s"
+                            ") AS batch(patron_oid, hold_amount, hold_length, invoice_oids) " \
+                        "WHERE overdues.patron_oid = batch.patron_oid",
+                        insert_str = ", ".join(f"({oid_key}, {holds_removed[oid_key]['amount']}, {holds_removed[oid_key]['length']}, {holds_removed[oid_key]['invoices']}::integer[])" for oid_key in holds_removed.keys()))
+            self.db.run("UPDATE invoices SET " \
+                            "WAIVED = true " \
+                        "WHERE invoice_oid IN %(i_ids)s", i_ids = tuple(invoice_oids))
     
     def excluded_allocations(self, allocations: str):
         allocation_list = allocations.split()
