@@ -135,10 +135,11 @@ class Overdues:
             print(f"Could not place fee with invoice_oid: {invoice_oid}")  # clean to actually use wco responses to determine
     
     # get all current overdues and apply holds (if >1day or reserve) and update DB -- DONE: NEED TEST
+    # On new - by checkout - process
     def _process_current_overdues(self):
         response = self.connection.get_current_overdue_allocations()
 
-        current__hold_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE hold_status')
+        current_hold_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE hold_status')
         current_fine_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE fee_status')
         current_registrar_holds = self.db.all('SELECT patron_oid FROM overdues WHERE registrar_hold')
         excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations')
@@ -164,7 +165,7 @@ class Overdues:
 
                 if consequences['Hold'] and allocation['oid'] not in excluded_checkouts:
                     invoice = False
-                    if allocation['oid'] not in current__hold_allocs:  # only process a checkout once
+                    if allocation['oid'] not in current_hold_allocs:  # only process a checkout once
                         invoice = self.place_hold(patron_oid, center)
                         invoice_oid = invoice['oid']
 
