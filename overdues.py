@@ -231,10 +231,9 @@ class Overdues:
         insert_dict = {}
         insert_query = ''
 
-        self.db.run(f"INSERT INTO history (time_ran) VALUES ('{end_search_time.isoformat()}')")
-        current_hold_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE hold_status')
+        self.db.run(f"INSERT INTO history (time_ran) VALUES ('{end_search_time.isoformat()}')") # should isolate to own function running at end
+        current_hold_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE hold_status')  # should tidy up and not do one big query, but single ones when needed
         current_fine_allocs = self.db.all('SELECT ck_oid, invoice_oid FROM invoices WHERE fee_status')
-        current_registrar_holds = self.db.all('SELECT patron_oid FROM overdues WHERE registrar_hold')
         excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations')
 
         response = self.connection.get_completed_overdue_allocations(start_search_time, end_search_time)
@@ -255,9 +254,15 @@ class Overdues:
                                 struck = True
                         if struck:
                             self.connection.apply_invoice_hold(invoice)
-                        if conseq['Registrar Hold'] and allocation['oid'] in current_registrar_holds:
-                            print(f"Items returned, registrar hold can be removed for oid: {allocation['patron']['oid']} -- {allocation['patron']['name']}")
-                            self.db.run(f"UPDATE overdues SET registrar_hold = {False} WHERE patron_oid = {allocation['patron']['oid']}")
+                        
+                        # check if invoice had registrar hold
+                        if conseq['Registrar Hold'] and self.db.run("SELECT registrar_hold FROM invoices WHERE invoice_oid = %(i_id)s", i_id = entry[1]):
+                            # check if only registrar hold on patrons account
+                            if self.db.run("SELECT registrar_hold_count FROM overdues WHERE patron_oid = %(p_id)s", p_id = allocation['patron']['oid']) == 1:
+                                print(f"Items returned, registrar hold can be removed for oid: {allocation['patron']['oid']} -- {allocation['patron']['name']}")
+
+                            self.db.run("UPDATE invoices SET registrar_hold = False WHERE invoice_oid = %(i_id)s", i_id = entry[1])
+                            self.db.run("UPDATE overdues SET registrar_hold_count = registrar_hold_count - 1 WHERE patron_oid = %(p_id)s", p_id=allocation['patron']['oid'])
 
                 # handle partial returns before due date
                 item_count = 0
@@ -268,34 +273,37 @@ class Overdues:
                         item_count += 1
 
                 try:
-                    insert_dict[allocation['patron']['oid']][0] += item_count
-                    insert_dict[allocation['patron']['oid']][1:] = ['True' if conseq['Hold'] else 'False',  # hold_status
+                    insert_dict[allocation['oid']][0] += item_count
+                    insert_dict[allocation['oid']][1:] = ['True' if conseq['Hold'] else 'False',  # hold_status
                                                                     'False',                                # fee_status ALWAYS false for returned items
                                                                     conseq['Hold'],                         # hold_length
                                                                     f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time
-                                                                    checkout_center]    # checkout center for hold
+                                                                    checkout_center,    # checkout center for hold
+                                                                    allocation]
 
                 except KeyError as e:
-                    insert_dict[allocation['patron']['oid']] = [item_count,
+                    insert_dict[allocation['oid']] = [item_count,
                                                                 'True' if conseq['Hold'] else 'False',  # hold_status
                                                                 'False',                                # fee_status ALWAYS false for returned items
                                                                 conseq['Hold'],                         # hold_length
                                                                 f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time
-                                                                checkout_center]    # checkout center for hold
+                                                                checkout_center,    # checkout center for hold
+                                                                allocation]
 
         for key, value in insert_dict.items():
             invoice_oid = False
 
-            if key not in current_holds:
+            ## Count potentially be moved into loop for allocs
+            if key not in current_hold_allocs:
                 if value[1] == 'True':
-                    invoice = self.place_hold(key, checkout_center=value[5], update_db=False)
+                    invoice = self.place_hold(key, checkout_center=value[5], allocation=value[6], update_db=False)
                     invoice_oid = invoice['oid']
                     self.connection.email_invoice(invoice)
             else:
-                invoice_oid = self.db.one(f'SELECT invoice_oid FROM overdues WHERE patron_oid = {key}')  #CLEAN
+                invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid = %(a_id)s', a_id = value[6]['oid'])
                 invoice = self.connection.get_invoice(invoice_oid).json()['payload']
                 self.connection.email_invoice(invoice)
-
+            #### insert_query and below postgres need conversion to new db layout
             insert_query += f"({key}, {value[0]}, {value[1]}, {value[2]}, {value[3]}, {value[4]}, {invoice_oid if invoice_oid else 'NULL'}),\n" 
         
 
