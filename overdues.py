@@ -138,8 +138,8 @@ class Overdues:
     def _process_current_overdues(self):
         response = self.connection.get_current_overdue_allocations()
 
-        current_holds = self.db.all('SELECT patron_oid FROM overdues WHERE hold_status')
-        current_fines = self.db.all('SELECT patron_oid FROM overdues WHERE fee_status')
+        current__hold_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE hold_status')
+        current_fine_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE fee_status')
         current_registrar_holds = self.db.all('SELECT patron_oid FROM overdues WHERE registrar_hold')
         excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations')
 
@@ -164,7 +164,7 @@ class Overdues:
 
                 if consequences['Hold'] and allocation['oid'] not in excluded_checkouts:
                     invoice = False
-                    if patron_oid not in current_holds:  # only processing one checkout at a time
+                    if allocation['oid'] not in current__hold_allocs:  # only process a checkout once
                         invoice = self.place_hold(patron_oid, center)
                         invoice_oid = invoice['oid']
 
@@ -174,10 +174,10 @@ class Overdues:
                             print(e)
 
                     else:
-                        invoice_oid = self.db.one(f'SELECT invoice_oid FROM overdues WHERE patron_oid={patron_oid}')
+                        invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_id=%(id)s', id=allocation['oid'])
                     if consequences['Fee']:
-                        if patron_oid not in current_fines:  # only processing one checkout at a time
-                            charge = allocation['aggregateValueOut'] if allocation['aggregateValueOut'] else 2000
+                        if allocation['oid'] not in current_fine_allocs:  # only one fee per invoice
+                            charge = allocation['aggregateValueOut'] if allocation['aggregateValueOut'] else 2000 # value of checked out items only
                             fee_placed = self.place_fee(invoice_oid, charge)
 
                             try:
@@ -190,18 +190,27 @@ class Overdues:
                         if consequences['Registrar Hold'] and patron_oid not in current_registrar_holds:
                             person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
                             print(f'Registrar Hold needed for: {person["name"]} - ({person["barcode"]})')
-                            self.db.run(f"UPDATE overdues SET registrar_hold = {True} WHERE patron_oid = {patron_oid}")
+                            self.db.run("UPDATE invoices SET registrar_hold = True WHERE invoice_oid = %(i_id)s", i_id = invoice_oid)
+                            self.db.run("UPDATE overdues SET registrar_hold = registrar_hold + 1 WHERE patron_oid = %(p_id)s", p_id = patron_oid)
                     if invoice:
                         self.connection.email_invoice(invoice)
 
                 elif allocation['oid'] in excluded_checkouts:
-                    invoice_oid = self.db.one(f'SELECT invoice_oid FROM overdues WHERE patron_oid={patron_oid}')
+                    invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid=%(a_id)s', a_id = allocation['oid'])
                     if invoice_oid:
                         self.remove_hold(invoice_oid)
                         if consequences['Registrar Hold'] and patron_oid in current_registrar_holds:
                             person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
                             print(f'Excluded Registrar Hold Patron - Remove: {person["name"]} - ({person["barcode"]})')
-                            self.db.run(f"UPDATE overdues SET registrar_hold = {False} WHERE patron_oid = {patron_oid}")
+
+                            with self.db.get_cursor() as cursor:
+                                cursor.run("DELETE FROM invoices WHERE ck_oid = %(a_id)s RETURNING hold_status, fee_status", a_id = allocation['oid'])
+                                prev_status = cursor.fetchone()
+
+                            self.db.run("UPDATE overdues SET hold_count = hold_count - %(hold_amount)s, " \
+                                            "fee_count = fee_count - %(fee_amount)s, " \
+                                            "registrar_hold = registrar_hold - 1 " \
+                                        "WHERE patron_oid = %(p_id)s", hold_amount = int(prev_status[0]), fee_amount = int(prev_status[1]), p_id = patron_oid) # convert previous hold/fee status to 1/0 for updating overdues
         
         try:
             self.texting.ticketify()
@@ -393,42 +402,42 @@ class Overdues:
                         "VALUES " \
                             f"{insert_query.strip()[:-1]}" \
                         "ON CONFLICT (allocation_oid) DO NOTHING")
-    
+
     # balance invoice and overdues databases
     # reconciling hold_length, hold_remove_time, hold_status, fee_status, and registrar_hold
     # count should always be up to date in overdues
-    def balance_databases(self, patron_oid: int = None):
-        # balance one patron's info between databases
-        update_query = ""
-        if patron_oid:
-            current_overdue_status = self.db.one("SELECT * FROM overdues WHERE patron_oid = %(oid)i", oid=patron_oid)
-            current_invoice_status = self.db.all(f"SELECT * FROM invoices WHERE invoice_oid IN ({current_overdue_status.invoice_oids})")
+    # def balance_databases(self, patron_oid: int = None):
+    #     # balance one patron's info between databases
+    #     update_query = ""
+    #     if patron_oid:
+    #         current_overdue_status = self.db.one("SELECT * FROM overdues WHERE patron_oid = %(oid)i", oid=patron_oid)
+    #         current_invoice_status = self.db.all(f"SELECT * FROM invoices WHERE invoice_oid IN ({current_overdue_status.invoice_oids})")
 
-            # reconcile hold_length
-            pass # decide if extending hold length or overlapping
+    #         # reconcile hold_length
+    #         pass # decide if extending hold length or overlapping
 
-            # reconcile hold_remove_time
-            pass # function of hold_length & current overdues essentially, relies on same decision
+    #         # reconcile hold_remove_time
+    #         pass # function of hold_length & current overdues essentially, relies on same decision
 
-            # reconcile hold_status
-            if current_overdue_status.hold_status and True not in (record.hold_status for record in current_invoice_status):
-                update_query += f"hold_status = {False}, "
-            elif not current_overdue_status.hold_status and True in (record.hold_status for record in current_invoice_status):
-                update_query += f"hold_status = {True}, "
+    #         # reconcile hold_status
+    #         if current_overdue_status.hold_status and True not in (record.hold_status for record in current_invoice_status):
+    #             update_query += f"hold_status = {False}, "
+    #         elif not current_overdue_status.hold_status and True in (record.hold_status for record in current_invoice_status):
+    #             update_query += f"hold_status = {True}, "
 
-            # reconcile fee_status
-            if current_overdue_status.fee_status and True not in (record.fee_status for record in current_invoice_status):
-                update_query += f"fee_status = {False}, "
-            elif not current_overdue_status.fee_status and True in (record.fee_status for record in current_invoice_status):
-                update_query += f"fee_status = {True}, "
+    #         # reconcile fee_status
+    #         if current_overdue_status.fee_status and True not in (record.fee_status for record in current_invoice_status):
+    #             update_query += f"fee_status = {False}, "
+    #         elif not current_overdue_status.fee_status and True in (record.fee_status for record in current_invoice_status):
+    #             update_query += f"fee_status = {True}, "
             
-            # reconcile registrar_hold
-            if current_overdue_status.registrar_hold and True not in (record.registrar_hold for record in current_invoice_status):
-                update_query += f"registrar_hold = {False}, "
-            elif not current_overdue_status.registrar_hold and True in (record.registrar_hold for record in current_invoice_status):
-                update_query += f"registrar_hold = {True}, "
+    #         # reconcile registrar_hold
+    #         if current_overdue_status.registrar_hold and True not in (record.registrar_hold for record in current_invoice_status):
+    #             update_query += f"registrar_hold = {False}, "
+    #         elif not current_overdue_status.registrar_hold and True in (record.registrar_hold for record in current_invoice_status):
+    #             update_query += f"registrar_hold = {True}, "
             
-            self.db.run("UPDATE overdues SET %(query)s WHERE patron_oid = %(oid)i", query=update_query, oid=patron_oid)
+    #         self.db.run("UPDATE overdues SET %(query)s WHERE patron_oid = %(oid)i", query=update_query, oid=patron_oid)
 
     # check for inconsistancies between db and wco
     def reconcile_database(self):
