@@ -141,28 +141,27 @@ class Overdues:
 
         current_hold_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE hold_status')
         current_fine_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE fee_status')
-        current_registrar_holds = self.db.all('SELECT patron_oid FROM overdues WHERE registrar_hold')
+        current_registrar_holds = self.db.all('SELECT ck_oid FROM invoices WHERE registrar_hold')
         excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations')
 
         for allocation in response.json()['payload']['result']:
+            center = allocation['checkoutCenter']
+            patron_oid = allocation['patron']['oid']
+
+            scheduled_end = datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+            tz = timezone(timedelta(hours=-6), name='utc-6')
+            #tz.dst = True
+
+            # NOW BACKTRACKING
+            # policy_start_date = datetime(year=2024, month=1, day=23, tzinfo=tz)
+            # if scheduled_end < policy_start_date:
+            #     scheduled_end = policy_start_date
+            overdue_length = (datetime.now(tz=tz) - scheduled_end).days
+
+            allocation_types = [item['rtype'] for item in allocation['items'] if item['action'].lower() == 'checkout']
+            consequences = Repercussions(overdue_length, allocation_types).update()
 
             if allocation['oid'] not in excluded_checkouts:
-                center = allocation['checkoutCenter']
-                patron_oid = allocation['patron']['oid']
-
-                scheduled_end = datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
-                tz = timezone(timedelta(hours=-6), name='utc-6')
-                #tz.dst = True
-
-                # NOW BACKTRACKING
-                # policy_start_date = datetime(year=2024, month=1, day=23, tzinfo=tz)
-                # if scheduled_end < policy_start_date:
-                #     scheduled_end = policy_start_date
-                overdue_length = (datetime.now(tz=tz) - scheduled_end).days
-
-                allocation_types = [item['rtype'] for item in allocation['items'] if item['action'].lower() == 'checkout']
-                consequences = Repercussions(overdue_length, allocation_types).update()
-
                 if consequences['Hold'] and allocation['oid'] not in excluded_checkouts:
                     invoice = False
                     if allocation['oid'] not in current_hold_allocs:  # only process a checkout once
@@ -188,30 +187,35 @@ class Overdues:
 
                             if not fee_placed:
                                 print(f"No fee placed on person with oid:{patron_oid}")
-                        if consequences['Registrar Hold'] and patron_oid not in current_registrar_holds:
-                            person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
-                            print(f'Registrar Hold needed for: {person["name"]} - ({person["barcode"]})')
+                        if consequences['Registrar Hold'] and allocation['oid'] not in current_registrar_holds:
+                            # if this is their first registrar hold
+                            if self.db.run("SELECT registrar_hold_count FROM overdues WHERE patron_oid = %(p_id)s", p_id = patron_oid) == 0:
+                                person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
+                                print(f'Registrar Hold needed for: {person["name"]} - ({person["barcode"]})')
+                                
                             self.db.run("UPDATE invoices SET registrar_hold = True WHERE invoice_oid = %(i_id)s", i_id = invoice_oid)
                             self.db.run("UPDATE overdues SET registrar_hold = registrar_hold + 1 WHERE patron_oid = %(p_id)s", p_id = patron_oid)
                     if invoice:
                         self.connection.email_invoice(invoice)
 
-                elif allocation['oid'] in excluded_checkouts:
-                    invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid=%(a_id)s', a_id = allocation['oid'])
-                    if invoice_oid:
-                        self.remove_hold(invoice_oid)
-                        if consequences['Registrar Hold'] and patron_oid in current_registrar_holds:
-                            person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
+            elif allocation['oid'] in excluded_checkouts:
+                invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid=%(a_id)s', a_id = allocation['oid'])
+                if invoice_oid:
+                    self.remove_hold(invoice_oid)
+                    if consequences['Registrar Hold'] and allocation['oid'] in current_registrar_holds:
+                        person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
+                        # if this is their only registrar hold
+                        if self.db.run("SELECT registrar_hold_count FROM overdues WHERE patron_oid = %(p_id)s", p_id = patron_oid) == 1:
                             print(f'Excluded Registrar Hold Patron - Remove: {person["name"]} - ({person["barcode"]})')
 
-                            with self.db.get_cursor() as cursor:
-                                cursor.run("DELETE FROM invoices WHERE ck_oid = %(a_id)s RETURNING hold_status, fee_status", a_id = allocation['oid'])
-                                prev_status = cursor.fetchone()
+                        with self.db.get_cursor() as cursor:
+                            cursor.run("DELETE FROM invoices WHERE ck_oid = %(a_id)s RETURNING hold_status, fee_status", a_id = allocation['oid'])
+                            prev_status = cursor.fetchone()
 
-                            self.db.run("UPDATE overdues SET hold_count = hold_count - %(hold_amount)s, " \
-                                            "fee_count = fee_count - %(fee_amount)s, " \
-                                            "registrar_hold = registrar_hold - 1 " \
-                                        "WHERE patron_oid = %(p_id)s", hold_amount = int(prev_status[0]), fee_amount = int(prev_status[1]), p_id = patron_oid) # convert previous hold/fee status to 1/0 for updating overdues
+                        self.db.run("UPDATE overdues SET hold_count = hold_count - %(hold_amount)s, " \
+                                        "fee_count = fee_count - %(fee_amount)s, " \
+                                        "registrar_hold = registrar_hold - 1 " \
+                                    "WHERE patron_oid = %(p_id)s", hold_amount = int(prev_status[0]), fee_amount = int(prev_status[1]), p_id = patron_oid) # convert previous hold/fee status to 1/0 for updating overdues (should always be 1)
         
         try:
             self.texting.ticketify()
@@ -228,8 +232,8 @@ class Overdues:
         insert_query = ''
 
         self.db.run(f"INSERT INTO history (time_ran) VALUES ('{end_search_time.isoformat()}')")
-        current_holds = self.db.all('SELECT patron_oid FROM overdues WHERE hold_status')
-        current_fines = self.db.all('SELECT patron_oid, invoice_oid FROM overdues WHERE fee_status')
+        current_hold_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE hold_status')
+        current_fine_allocs = self.db.all('SELECT ck_oid, invoice_oid FROM invoices WHERE fee_status')
         current_registrar_holds = self.db.all('SELECT patron_oid FROM overdues WHERE registrar_hold')
         excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations')
 
@@ -240,8 +244,8 @@ class Overdues:
                 conseq, end_time, checkout_center = self.utils.get_overdue_consequence(allocation)
 
                 # If they have a fine, remove it as they returned the item
-                for entry in current_fines:
-                    if allocation['patron']['oid'] == entry[0]:
+                for entry in current_fine_allocs:
+                    if allocation['oid'] == entry[0]:
                         struck = False
                         invoice = self.connection.get_invoice(entry[1]).json()['payload']
                         invoice_lines = self.connection.get_invoice_lines(invoice).json()['payload']['result']
@@ -251,7 +255,7 @@ class Overdues:
                                 struck = True
                         if struck:
                             self.connection.apply_invoice_hold(invoice)
-                        if conseq['Registrar Hold'] and allocation['patron']['oid'] in current_registrar_holds:
+                        if conseq['Registrar Hold'] and allocation['oid'] in current_registrar_holds:
                             print(f"Items returned, registrar hold can be removed for oid: {allocation['patron']['oid']} -- {allocation['patron']['name']}")
                             self.db.run(f"UPDATE overdues SET registrar_hold = {False} WHERE patron_oid = {allocation['patron']['oid']}")
 
