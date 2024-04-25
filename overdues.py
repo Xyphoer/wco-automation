@@ -83,7 +83,7 @@ class Overdues:
                             "ON CONFLICT (invoice_oid) DO " \
                                 "UPDATE SET hold_status = EXCLUDED.hold_status, hold_length = EXCLUDED.hold_length, " \
                                     "hold_remove_time = EXCLUDED.hold_remove_time, ck_oid = EXCLUDED.ck_oid, patron_oid = EXCLUDED.patron_oid",
-                            i_id = invoice_oid, hold_s=True, hold_l=hold_length, hold_rtime=end, c_id = ck_oid, oid=oid)
+                            i_id = invoice_oid, hold_s=True, hold_l=hold_length, hold_rtime=back_hold_remove_time, c_id = ck_oid, oid=oid)
 
             # For no end, process same. 0D will be added to interval and to hold_remove_time. Invoice table entry will have 0 day and no hold_remove_time. Add to overall when returned.
             # Also, keep hold_status/fee_status = true even if hold_length is 0 and hold_remove_time is NULL. Only remove when all invoice oids have been removed.
@@ -229,7 +229,6 @@ class Overdues:
         # update db with new overdue items for patrons (Note: only count if the checkout is completed)
         # update step: returns dictionary of changes
         insert_dict = {}
-        insert_query = ''
 
         self.db.run(f"INSERT INTO history (time_ran) VALUES ('{end_search_time.isoformat()}')") # should isolate to own function running at end
         current_hold_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE hold_status')  # should tidy up and not do one big query, but single ones when needed
@@ -241,11 +240,13 @@ class Overdues:
         for allocation in response.json()['payload']['result']:
             if allocation['oid'] not in excluded_checkouts:
                 conseq, end_time, checkout_center = self.utils.get_overdue_consequence(allocation)
+                fee_status, registrar_status = 0, 0
 
                 # If they have a fine, remove it as they returned the item
                 for entry in current_fine_allocs:
                     if allocation['oid'] == entry[0]:
                         struck = False
+                        fee_status = 1
                         invoice = self.connection.get_invoice(entry[1]).json()['payload']
                         invoice_lines = self.connection.get_invoice_lines(invoice).json()['payload']['result']
                         for invoice_line in invoice_lines:
@@ -257,12 +258,14 @@ class Overdues:
                         
                         # check if invoice had registrar hold
                         if conseq['Registrar Hold'] and self.db.run("SELECT registrar_hold FROM invoices WHERE invoice_oid = %(i_id)s", i_id = entry[1]):
+                            registrar_status = 1 # used to decriment overall count
                             # check if only registrar hold on patrons account
                             if self.db.run("SELECT registrar_hold_count FROM overdues WHERE patron_oid = %(p_id)s", p_id = allocation['patron']['oid']) == 1:
                                 print(f"Items returned, registrar hold can be removed for oid: {allocation['patron']['oid']} -- {allocation['patron']['name']}")
 
-                            self.db.run("UPDATE invoices SET registrar_hold = False WHERE invoice_oid = %(i_id)s", i_id = entry[1])
-                            self.db.run("UPDATE overdues SET registrar_hold_count = registrar_hold_count - 1 WHERE patron_oid = %(p_id)s", p_id=allocation['patron']['oid'])
+                            # included updating of db in overall updates
+                            ##self.db.run("UPDATE invoices SET registrar_hold = False WHERE invoice_oid = %(i_id)s", i_id = entry[1])
+                            ##self.db.run("UPDATE overdues SET registrar_hold_count = registrar_hold_count - 1 WHERE patron_oid = %(p_id)s", p_id=allocation['patron']['oid'])
 
                 # handle partial returns before due date
                 item_count = 0
@@ -277,75 +280,141 @@ class Overdues:
                     insert_dict[allocation['oid']][1:] = ['True' if conseq['Hold'] else 'False',  # hold_status
                                                                     'False',                                # fee_status ALWAYS false for returned items
                                                                     conseq['Hold'],                         # hold_length
-                                                                    f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time
+                                                                    f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time (from ck end time)
                                                                     checkout_center,    # checkout center for hold
-                                                                    allocation]
+                                                                    allocation,
+                                                                    fee_status,
+                                                                    registrar_status]
 
                 except KeyError as e:
                     insert_dict[allocation['oid']] = [item_count,
                                                                 'True' if conseq['Hold'] else 'False',  # hold_status
                                                                 'False',                                # fee_status ALWAYS false for returned items
                                                                 conseq['Hold'],                         # hold_length
-                                                                f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time
+                                                                f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time (from ck end time)
                                                                 checkout_center,    # checkout center for hold
-                                                                allocation]
+                                                                allocation,
+                                                                fee_status,
+                                                                registrar_status]
 
         for key, value in insert_dict.items():
-            invoice_oid = False
+            try:
+                invoice_oid = False
 
-            ## Count potentially be moved into loop for allocs
-            if key not in current_hold_allocs:
-                if value[1] == 'True':
-                    invoice = self.place_hold(key, checkout_center=value[5], allocation=value[6], update_db=False)
-                    invoice_oid = invoice['oid']
+                ## Count potentially be moved into loop for allocs
+                if key not in current_hold_allocs:
+                    if value[1] == 'True':
+                        invoice = self.place_hold(key, checkout_center=value[5], allocation=value[6], update_db=False)
+                        invoice_oid = invoice['oid']
+                        self.connection.email_invoice(invoice)
+                else:
+                    invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid = %(a_id)s', a_id = value[6]['oid'])
+                    invoice = self.connection.get_invoice(invoice_oid).json()['payload']
                     self.connection.email_invoice(invoice)
-            else:
-                invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid = %(a_id)s', a_id = value[6]['oid'])
-                invoice = self.connection.get_invoice(invoice_oid).json()['payload']
-                self.connection.email_invoice(invoice)
-            #### insert_query and below postgres need conversion to new db layout
-            insert_query += f"({key}, {value[0]}, {value[1]}, {value[2]}, {value[3]}, {value[4]}, {invoice_oid if invoice_oid else 'NULL'}),\n" 
-        
+                #### insert_query and below postgres need conversion to new db layout
 
+                # Insert individually as processing:
+                ## DB more up to date if issue is encountered
+                ## Simpler solution for one given patron having multiple new invoices (both need to append)
+                ## Relatively few new invoices to process on a typical run so slightly slower updating is acceptable
+
+                ### NOTE: NEEDS special case updates. See line 395. Current idea: process for both hold_length and hold_remove_time at insert level and use EXCLUDED like current is on UPDATE level.
+                with self.db.get_cursor() as cursor:
+                    cursor.run("INSERT INTO " \
+                                    "overdues (patron_oid, count, hold_count, fee_count, hold_length, hold_remove_time, invoice_oids) " \
+                                "VALUES " \
+                                    "(%(oid)s, %(i_count)s, %(hold_c)s, 0, " \
+                                        "CASE " \
+                                            "WHEN %(i_count)s < 5"
+                                                "THEN CAST('%(hold_l)sD' AS INTERVAL), " \
+                                        "CASE " \
+                                            "WHEN %(i_count)s < 5"
+                                                "CAST(%(hold_rtime)s AS TIMESTAMP), " \
+                                        "%(i_id)s) " \
+                                "ON CONFLICT (patron_oid) DO " \
+                                    "UPDATE SET count = overdues.count + EXCLUDED.count, hold_count = overdues.hold_count + EXCLUDED.hold_count, " \
+                                    "fee_count = overdues.fee_count - %(fee_c)s, hold_length = overdues.hold_length + EXCLUDED.hold_length, " \
+                                    "hold_remove_time = overdues.hold_remove_time + EXCLUDED.hold_length, invoice_oids = overdues.invoice_oids || EXCLUDED.invoice_oids, "\
+                                    "registrar_hold_count = overdues.registrar_hold_count - %(r_hold_c)s " \
+                                "RETURNING hold_remove_time", oid        = value[6]['patron']['oid'],
+                                                            i_count    = value[0],
+                                                            hold_c     = 1 if value[1]=='True' else 0,
+                                                            fee_c      = value[7],
+                                                            hold_l     = value[3],
+                                                            hold_rtime = value[4],
+                                                            i_id       = str({invoice_oid}) if invoice_oid else '{}',
+                                                            r_hold_c   = value[8])
+                    back_hold_remove_time = cursor.fetchone()[0] # gives datetime.datetime object for extended hold_remove time of sequential invoices
+                
+                if invoice_oid:
+                    # add/update invoice entry in invoices db.
+                    ## When updating:
+                    #### count: No change. Both should be the same
+                    #### hold_status: No change. hold should always be in place here
+                    #### fee_status: Take new value. Fee should be removed.
+                    #### hold_length: Take new value. Just calculated final hold_length
+                    #### hold_remove_time: Take new value. Just calculated
+                    #### ck_oid: No change. Both should be the same
+                    #### patron_oid: No change: Both should be the same
+                    #### registrar_hold: Should be removed.
+                    self.db.run("INSERT INTO " \
+                                    "invoices (invoice_oid, count, hold_status, fee_status, hold_length, hold_remove_time, ck_oid, patron_oid) " \
+                                "VALUES " \
+                                    "(%(i_id)s, %(i_count)s, %(hold_s)s, False, CAST('%(hold_l)sD' AS INTERVAL), CAST(%(hold_rtime)s AS TIMESTAMP), %(c_oid)s, %(p_oid)s)" \
+                                "ON CONFLICT (invoice_oid) DO " \
+                                    "UPDATE SET fee_status = EXCLUDED.fee_status, hold_length = EXCLUDED.hold_length, " \
+                                    "hold_remove_time = EXCLUDED.hold_remove_time, registrar_hold = False", i_id = invoice_oid,
+                                                                                                            i_count = value[0],
+                                                                                                            hold_s = value[1],
+                                                                                                            hold_l = value[3],
+                                                                                                            hold_rtime = back_hold_remove_time,
+                                                                                                            c_oid = key,
+                                                                                                            p_oid = value[6]['patron']['oid'])
+            except Exception as e:
+                print(key, value, invoice_oid)
+                print(e)
+        
+        return
+
+        ###>>> LEGACY
         # "WHEN overdues.fee_status OR EXCLUDED.fee_status " \
         #                         "THEN NULL " \
             # fee_status = overdues.fee_status OR EXCLUDED.fee_status
         ##### HOLD LENGTH currently unreliable source of info
-        try:
-            if insert_query:
-                self.db.run("INSERT INTO " \
-                                f"overdues (patron_oid, count, hold_status, fee_status, hold_length, hold_remove_time, invoice_oid) " \
-                            "VALUES " \
-                                f"{insert_query.strip()[:-1]}" \
-                            "ON CONFLICT (patron_oid) DO " \
-                                "UPDATE SET count = overdues.count + EXCLUDED.count, " \
-                                "hold_status = overdues.hold_status OR EXCLUDED.hold_status, " \
-                                "fee_status = EXCLUDED.fee_status, " \
-                                "hold_length = EXCLUDED.hold_length, " \
-                                "hold_remove_time = CASE " \
-                                    "WHEN overdues.count = 5 " \
-                                        f"THEN (EXCLUDED.hold_remove_time - (EXCLUDED.hold_length || ' days')::INTERVAL + '90 days'::INTERVAL)::TIMESTAMP " \
-                                    "WHEN overdues.count = 10 " \
-                                        f"THEN (EXCLUDED.hold_remove_time - (EXCLUDED.hold_length || ' days')::INTERVAL + '180 days'::INTERVAL)::TIMESTAMP " \
-                                    "WHEN overdues.count > 11 " \
-                                        f"THEN NULL " \
-                                    "WHEN overdues.hold_remove_time < EXCLUDED.hold_remove_time " \
-                                        "THEN EXCLUDED.hold_remove_time " \
-                                    "WHEN overdues.hold_remove_time IS NOT NULL " \
-                                        "THEN overdues.hold_remove_time " \
-                                    "ELSE EXCLUDED.hold_remove_time " \
-                                "END, " \
-                                "invoice_oid = CASE " \
-                                    "WHEN EXCLUDED.invoice_oid IS NOT NULL " \
-                                        "THEN EXCLUDED.invoice_oid " \
-                                    "WHEN overdues.invoice_oid IS NOT NULL " \
-                                        "THEN overdues.invoice_oid " \
-                                    "ELSE NULL " \
-                                "END")
-        except Exception as e:
-            print(insert_query)
-            print(e)
-        return
+        # try:
+        #     if insert_query:
+        #         self.db.run("INSERT INTO " \
+        #                         f"overdues (patron_oid, count, hold_status, fee_status, hold_length, hold_remove_time, invoice_oid) " \
+        #                     "VALUES " \
+        #                         f"{insert_query.strip()[:-1]}" \
+        #                     "ON CONFLICT (patron_oid) DO " \
+        #                         "UPDATE SET count = overdues.count + EXCLUDED.count, " \
+        #                         "hold_status = overdues.hold_status OR EXCLUDED.hold_status, " \
+        #                         "fee_status = EXCLUDED.fee_status, " \
+        #                         "hold_length = EXCLUDED.hold_length, " \
+        #                         "hold_remove_time = CASE " \
+        #                             "WHEN overdues.count = 5 " \
+        #                                 f"THEN (EXCLUDED.hold_remove_time - (EXCLUDED.hold_length || ' days')::INTERVAL + '90 days'::INTERVAL)::TIMESTAMP " \
+        #                             "WHEN overdues.count = 10 " \
+        #                                 f"THEN (EXCLUDED.hold_remove_time - (EXCLUDED.hold_length || ' days')::INTERVAL + '180 days'::INTERVAL)::TIMESTAMP " \
+        #                             "WHEN overdues.count > 11 " \
+        #                                 f"THEN NULL " \
+        #                             "WHEN overdues.hold_remove_time < EXCLUDED.hold_remove_time " \
+        #                                 "THEN EXCLUDED.hold_remove_time " \
+        #                             "WHEN overdues.hold_remove_time IS NOT NULL " \
+        #                                 "THEN overdues.hold_remove_time " \
+        #                             "ELSE EXCLUDED.hold_remove_time " \
+        #                         "END, " \
+        #                         "invoice_oid = CASE " \
+        #                             "WHEN EXCLUDED.invoice_oid IS NOT NULL " \
+        #                                 "THEN EXCLUDED.invoice_oid " \
+        #                             "WHEN overdues.invoice_oid IS NOT NULL " \
+        #                                 "THEN overdues.invoice_oid " \
+        #                             "ELSE NULL " \
+        #                         "END")
+        # except Exception as e:
+        #     print(insert_query)
+        #     print(e)
 
     # check for those who have paid their fine, and resolve hold end date if they have NOTE: Done   ALSO: return and delete (paying fine equates to lost) NOTE: Done, UPGRADE PATH
     # NOTE: still open $0.00 holds count as 'Paid' not 'Pending' thus are not open. (Still can have hold). Staff can 'strike' charges when they are paid.
