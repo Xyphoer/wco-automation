@@ -463,14 +463,14 @@ class Overdues:
         allocation_list = allocations.split()
         insert_query = ""
         for allocation in allocation_list:
-            insert_query += "(" + str(self.connection.get_checkout(id=allocation if not allocation.isdigit() else 'CK-' + allocation).json()['payload']['result'][0]['oid']) + ")," + '\n'
+            insert_query += "(" + str(self.connection.get_checkout(id=allocation if not allocation.isdigit() else 'CK-' + allocation).json()['payload']['result'][0]['oid']) + f", {datetime.now() + timedelta(days=365)})," + '\n'
         
         if insert_query:
             self.db.run("INSERT INTO " \
                             "excluded_allocations (allocation_oid) " \
                         "VALUES " \
-                            f"{insert_query.strip()[:-1]}" \
-                        "ON CONFLICT (allocation_oid) DO NOTHING")
+                            "%(ins)s" \
+                        "ON CONFLICT (allocation_oid) DO NOTHING", ins = insert_query.strip()[:-1])
 
     # balance invoice and overdues databases
     # reconciling hold_length, hold_remove_time, hold_status, fee_status, and registrar_hold
