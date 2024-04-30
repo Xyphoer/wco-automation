@@ -225,6 +225,7 @@ class Overdues:
         return
 
     # get all returned overdues and resolve hold end date, fine, or fully create if needed. -- NOTE: Need fine implement & alloc with diff return times handler
+    # on new - by checkout - process
     def _process_returned_overdues(self, start_search_time: datetime, end_search_time: datetime): #  -> dict
         # update db with new overdue items for patrons (Note: only count if the checkout is completed)
         # update step: returns dictionary of changes
@@ -318,25 +319,42 @@ class Overdues:
                 ## Simpler solution for one given patron having multiple new invoices (both need to append)
                 ## Relatively few new invoices to process on a typical run so slightly slower updating is acceptable
 
-                ### NOTE: NEEDS special case updates. See line 395. Current idea: process for both hold_length and hold_remove_time at insert level and use EXCLUDED like current is on UPDATE level.
+                ### NOTE: First time overdues are excluded from exceptional hold lengths (i.e. >5 overdues, etc.) All exceptional holds are placed based on "previous" status, not considering current overdues
+                ### NOTE: Overdue amount thresholds are Greater Than, not only once
                 with self.db.get_cursor() as cursor:
                     cursor.run("INSERT INTO " \
                                     "overdues (patron_oid, count, hold_count, fee_count, hold_length, hold_remove_time, invoice_oids) " \
                                 "VALUES " \
-                                    "(%(oid)s, %(i_count)s, %(hold_c)s, 0, " \
-                                        "CASE " \
-                                            "WHEN %(i_count)s < 5"
-                                                "THEN CAST('%(hold_l)sD' AS INTERVAL), " \
-                                        "CASE " \
-                                            "WHEN %(i_count)s < 5"
-                                                "CAST(%(hold_rtime)s AS TIMESTAMP), " \
-                                        "%(i_id)s) " \
+                                    "(%(oid)s, %(i_count)s, %(hold_c)s, 0, CAST('%(hold_l)sD' AS INTERVAL), CAST(%(hold_rtime)s AS TIMESTAMP), %(i_id)s) " \
                                 "ON CONFLICT (patron_oid) DO " \
                                     "UPDATE SET count = overdues.count + EXCLUDED.count, hold_count = overdues.hold_count + EXCLUDED.hold_count, " \
-                                    "fee_count = overdues.fee_count - %(fee_c)s, hold_length = overdues.hold_length + EXCLUDED.hold_length, " \
-                                    "hold_remove_time = overdues.hold_remove_time + EXCLUDED.hold_length, invoice_oids = overdues.invoice_oids || EXCLUDED.invoice_oids, "\
+                                    "fee_count = overdues.fee_count - %(fee_c)s, " \
+                                    "hold_length = CASE " \
+                                        "WHEN overdues.count >= 12 " \
+                                            "THEN '0'::INTERVAL " \
+                                        "WHEN overdues.count >= 10 " \
+                                            "THEN overdues.count + '180D'::INTERVAL " \
+                                        "WHEN overdues.count >= 5 " \
+                                            "THEN overdues.count + '90D'::INTERVAL " \
+                                        "ELSE overdues.count + EXCLUDED.count " \
+                                    "hold_remove_time = CASE " \
+                                        "WHEN overdues.count >= 12 " \
+                                            "THEN NULL " \
+                                        "WHEN overdues.count >= 10 AND overdues.hold_remove_time IS NULL " \
+                                            "THEN (EXCLUDED.hold_remove_time - EXCLUDED.hold_length + '180D'::INTERVAL)::TIMESTAMP " \
+                                        "WHEN overdues.count >= 10 AND overdues.hold_remove_time IS NOT NULL " \
+                                            "THEN overdues.hold_remove_time + '180D'::INTERVAL " \
+                                        "WHEN overdues.count >= 5 AND overdues.hold_remove_time IS NULL " \
+                                            "THEN (EXCLUDED.hold_remove_time - EXCLUDED.hold_length + '90D'::INTERVAL)::TIMESTAMP " \
+                                        "WHEN overdues.count >= 5 AND overdues.hold_remove_time IS NOT NULL " \
+                                            "THEN overdues.hold_remove_time + '90D'::INTERVAL " \
+                                        "WHEN overdues.hold_remove_time IS NULL " \
+                                            "THEN EXCLUDED.hold_remove_time " \
+                                        "ELSE overdues.hold_remove_time + EXCLUDED.hold_remove_time " \
+                                    "invoice_oids = overdues.invoice_oids || EXCLUDED.invoice_oids, "\
                                     "registrar_hold_count = overdues.registrar_hold_count - %(r_hold_c)s " \
-                                "RETURNING hold_remove_time", oid        = value[6]['patron']['oid'],
+                                "RETURNING hold_remove_time, overdues.count",
+                                                            oid        = value[6]['patron']['oid'],
                                                             i_count    = value[0],
                                                             hold_c     = 1 if value[1]=='True' else 0,
                                                             fee_c      = value[7],
@@ -344,9 +362,18 @@ class Overdues:
                                                             hold_rtime = value[4],
                                                             i_id       = str({invoice_oid}) if invoice_oid else '{}',
                                                             r_hold_c   = value[8])
-                    back_hold_remove_time = cursor.fetchone()[0] # gives datetime.datetime object for extended hold_remove time of sequential invoices
+                    back_hold_remove_time, overdues_count = cursor.fetchone() # gives datetime.datetime object for extended hold_remove time of sequential invoices
                 
                 if invoice_oid:
+                    hold_len = value[3]
+                    prev_o_count = overdues_count - value[0]
+                    if prev_o_count >= 12:
+                        hold_len = 0
+                    elif prev_o_count >= 10:
+                        hold_len = 180
+                    elif prev_o_count >= 5:
+                        hold_len = 90
+                    
                     # add/update invoice entry in invoices db.
                     ## When updating:
                     #### count: No change. Both should be the same
@@ -366,7 +393,7 @@ class Overdues:
                                     "hold_remove_time = EXCLUDED.hold_remove_time, registrar_hold = False", i_id = invoice_oid,
                                                                                                             i_count = value[0],
                                                                                                             hold_s = value[1],
-                                                                                                            hold_l = value[3],
+                                                                                                            hold_l = hold_len,
                                                                                                             hold_rtime = back_hold_remove_time,
                                                                                                             c_oid = key,
                                                                                                             p_oid = value[6]['patron']['oid'])
@@ -375,46 +402,6 @@ class Overdues:
                 print(e)
         
         return
-
-        ###>>> LEGACY
-        # "WHEN overdues.fee_status OR EXCLUDED.fee_status " \
-        #                         "THEN NULL " \
-            # fee_status = overdues.fee_status OR EXCLUDED.fee_status
-        ##### HOLD LENGTH currently unreliable source of info
-        # try:
-        #     if insert_query:
-        #         self.db.run("INSERT INTO " \
-        #                         f"overdues (patron_oid, count, hold_status, fee_status, hold_length, hold_remove_time, invoice_oid) " \
-        #                     "VALUES " \
-        #                         f"{insert_query.strip()[:-1]}" \
-        #                     "ON CONFLICT (patron_oid) DO " \
-        #                         "UPDATE SET count = overdues.count + EXCLUDED.count, " \
-        #                         "hold_status = overdues.hold_status OR EXCLUDED.hold_status, " \
-        #                         "fee_status = EXCLUDED.fee_status, " \
-        #                         "hold_length = EXCLUDED.hold_length, " \
-        #                         "hold_remove_time = CASE " \
-        #                             "WHEN overdues.count = 5 " \
-        #                                 f"THEN (EXCLUDED.hold_remove_time - (EXCLUDED.hold_length || ' days')::INTERVAL + '90 days'::INTERVAL)::TIMESTAMP " \
-        #                             "WHEN overdues.count = 10 " \
-        #                                 f"THEN (EXCLUDED.hold_remove_time - (EXCLUDED.hold_length || ' days')::INTERVAL + '180 days'::INTERVAL)::TIMESTAMP " \
-        #                             "WHEN overdues.count > 11 " \
-        #                                 f"THEN NULL " \
-        #                             "WHEN overdues.hold_remove_time < EXCLUDED.hold_remove_time " \
-        #                                 "THEN EXCLUDED.hold_remove_time " \
-        #                             "WHEN overdues.hold_remove_time IS NOT NULL " \
-        #                                 "THEN overdues.hold_remove_time " \
-        #                             "ELSE EXCLUDED.hold_remove_time " \
-        #                         "END, " \
-        #                         "invoice_oid = CASE " \
-        #                             "WHEN EXCLUDED.invoice_oid IS NOT NULL " \
-        #                                 "THEN EXCLUDED.invoice_oid " \
-        #                             "WHEN overdues.invoice_oid IS NOT NULL " \
-        #                                 "THEN overdues.invoice_oid " \
-        #                             "ELSE NULL " \
-        #                         "END")
-        # except Exception as e:
-        #     print(insert_query)
-        #     print(e)
 
     # check for those who have paid their fine, and resolve hold end date if they have NOTE: Done   ALSO: return and delete (paying fine equates to lost) NOTE: Done, UPGRADE PATH
     # NOTE: still open $0.00 holds count as 'Paid' not 'Pending' thus are not open. (Still can have hold). Staff can 'strike' charges when they are paid.
