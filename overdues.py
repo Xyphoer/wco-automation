@@ -333,13 +333,14 @@ class Overdues:
                                         "WHEN overdues.count >= 12 " \
                                             "THEN '0'::INTERVAL " \
                                         "WHEN overdues.count >= 10 " \
-                                            "THEN overdues.count + '180D'::INTERVAL " \
+                                            "THEN overdues.hold_length + '180D'::INTERVAL " \
                                         "WHEN overdues.count >= 5 " \
-                                            "THEN overdues.count + '90D'::INTERVAL " \
-                                        "ELSE overdues.count + EXCLUDED.count " \
+                                            "THEN overdues.hold_length + '90D'::INTERVAL " \
+                                        "ELSE overdues.hold_length + EXCLUDED.hold_length " \
+                                    "END, " \
                                     "hold_remove_time = CASE " \
                                         "WHEN overdues.count >= 12 " \
-                                            "THEN NULL " \
+                                            "THEN NULL::TIMESTAMP " \
                                         "WHEN overdues.count >= 10 AND overdues.hold_remove_time IS NULL " \
                                             "THEN (EXCLUDED.hold_remove_time - EXCLUDED.hold_length + '180D'::INTERVAL)::TIMESTAMP " \
                                         "WHEN overdues.count >= 10 AND overdues.hold_remove_time IS NOT NULL " \
@@ -351,6 +352,7 @@ class Overdues:
                                         "WHEN overdues.hold_remove_time IS NULL " \
                                             "THEN EXCLUDED.hold_remove_time " \
                                         "ELSE overdues.hold_remove_time + EXCLUDED.hold_remove_time " \
+                                    "END, " \
                                     "invoice_oids = overdues.invoice_oids || EXCLUDED.invoice_oids, "\
                                     "registrar_hold_count = overdues.registrar_hold_count - %(r_hold_c)s " \
                                 "RETURNING hold_remove_time, overdues.count",
@@ -405,26 +407,71 @@ class Overdues:
 
     # check for those who have paid their fine, and resolve hold end date if they have NOTE: Done   ALSO: return and delete (paying fine equates to lost) NOTE: Done, UPGRADE PATH
     # NOTE: still open $0.00 holds count as 'Paid' not 'Pending' thus are not open. (Still can have hold). Staff can 'strike' charges when they are paid.
+    # NOTE: UPDATE singly for reconciliation of hold_remove_time
     def _process_fines(self):
-        fined_patrons = self.db.all('SELECT patron_oid, hold_length, invoice_oid FROM overdues WHERE fee_status')
-        db_update = []
+        fined_patrons = self.db.all('SELECT patron_oid, hold_length, invoice_oid, registrar_hold FROM invoices WHERE fee_status')
+        db_invoices_update = []
+        # db_overdues_update = {}
 
-        for patron_oid, hold_length, invoice_oid in fined_patrons:
+        for patron_oid, hold_length, invoice_oid, registrar_hold in fined_patrons:
             invoice = self.connection.get_invoice(invoice_oid, ['datePaid', 'isHold']).json()['payload']
             if invoice['datePaid']:
 
                 name = self.connection.get_patron(patron_oid, ['name']).json()['payload']['name']
                 print(f"Patron oid: {patron_oid} -- paid fine -- {name} -- Return & Delete item")
+                if registrar_hold:
+                    print(f"Patron oid: {patron_oid} -- paid fine -- {name} -- Remove Registrar Hold")
 
                 date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
-                db_update.append((patron_oid, date_paid + timedelta(days=hold_length)))   # NOTE: if fine on second overdue of overlapping, uses first length. NOT IDEAL (fallback anything though - all paid fines should be returned)
-            # if not invoice['isHold']: # decide methodology (place_hold creates invoice... Seperate functions? or just hold stuff here) -- Note: Should not come into play, backup for if staff removes hold. Update path.
+                self.db.run("UPDATE overdues SET " \
+                                "fee_count = fee_count - 1, " \
+                                "hold_length = CASE " \
+                                    "WHEN count >= 12 " \
+                                        "THEN '0'::INTERVAL " \
+                                    "WHEN count >= 10 " \
+                                        "THEN hold_length + '180D'::INTERVAL " \
+                                    "WHEN count >= 5 " \
+                                        "THEN hold_length + '90D'::INTERVAL " \
+                                    "ELSE hold_length + %(base_extended)s"
+                                "END " \
+                                "hold_remove_time = CASE " \
+                                    "WHEN count >= 12 " \
+                                        "THEN NULL::TIMESTAMP " \
+                                    "WHEN count >= 10 AND (hold_remove_time < 'NOW'::TIMESTAMP OR hold_remove_time IS NULL) " \
+                                        "THEN (%(paid_length)s + '180D'::INTERVAL)::TIMESTAMP " \
+                                    "WHEN count >= 10 " \
+                                        "THEN (hold_remove_time + '180D'::INTERVAL)::TIMESTAMP " \
+                                    "WHEN count >= 5 AND (hold_remove_time < 'NOW'::TIMESTAMP OR hold_remove_time IS NULL) " \
+                                        "THEN (%(paid_length)s + '90D'::INTERVAL)::TIMESTAMP " \
+                                    "WHEN count >= 5 " \
+                                        "THEN (hold_remove_time + '90D'::INTERVAL)::TIMESTAMP " \
+                                    "WHEN hold_remove_time < 'NOW'::TIMESTAMP OR hold_remove_time IS NULL" \
+                                        "THEN %(paid_length)s::TIMESTAMP " \
+                                    "ELSE hold_remove_time + %(base_extended)s END " \
+                                "WHERE patron_oid = %(p_oid)s", paid_length   = date_paid + timedelta(days=hold_length),
+                                                                base_extended = f'{hold_length}D::INTERVAL')
+                
+                self.db.run("UPDATE invoices SET " \
+                                "fee_status = false, " \
+                                "registrar_hold = false, " \
+                                "hold_length = CASE " \
+                                "END, " \
+                                "hold_remove_time = CASE " \
+                                "END, "
+                            "WHERE invoice_oid = %(i_oid)s", i_oid = invoice_oid)
+
+        #         db_invoices_update.append((patron_oid, date_paid + timedelta(days=hold_length)))   # NOTE: if fine on second overdue of overlapping, uses first length. NOT IDEAL (fallback anything though - all paid fines should be returned)
+        #     # if not invoice['isHold']: # decide methodology (place_hold creates invoice... Seperate functions? or just hold stuff here) -- Note: Should not come into play, backup for if staff removes hold. Update path.
         
-        if db_update:   # NOTE: if has current overdue time does not preserve/take greatest, overwrites.
-            self.db.run(f"UPDATE overdues SET " \
-                            "hold_remove_time = batch.hold_remove_time " \
-                        f"FROM (VALUES ({', '.join(db_update)})) AS batch(patron_oid, hold_remove_time) " \
-                        "WHERE overdues.patron_oid = batch.patron_oid")
+        # if db_invoices_update:   # NOTE: if has current overdue time does not preserve/take greatest, overwrites.
+        #     #with self.db.get_cursor() as cursor:
+        #     #    cursor.run()
+        #     #self.db.run("UPDATE invoices SET ")
+
+        #     self.db.run(f"UPDATE overdues SET " \
+        #                     "hold_remove_time = batch.hold_remove_time " \
+        #                 f"FROM (VALUES ({', '.join(db_invoices_update)})) AS batch(patron_oid, hold_remove_time) " \
+        #                 "WHERE overdues.patron_oid = batch.patron_oid")
 
     # remove holds on patrons who have reached the designated time of removal.
     # On new - by checkout - process
@@ -449,7 +496,11 @@ class Overdues:
         if holds_removed:
             self.db.run("UPDATE overdues SET " \
                             "hold_count = overdues.hold_count - batch.hold_amount, hold_length = overdues.hold_length - batch.hold_length, " \
-                            "hold_remove_time = NULL:timestamp, invoice_oids = overdues.invoice_oids - batch.invoice_oids "\
+                            "hold_remove_time = CASE " \
+                                "WHEN overdues.hold_remove_time < 'NOW'::TIMESTAMP " \
+                                    "THEN NULL::TIMESTAMP " \
+                                "ELSE DO NOTHING END" \
+                            "invoice_oids = overdues.invoice_oids - batch.invoice_oids "\
                         "FROM (VALUES " \
                                     "%(insert_str)s"
                             ") AS batch(patron_oid, hold_amount, hold_length, invoice_oids) " \
