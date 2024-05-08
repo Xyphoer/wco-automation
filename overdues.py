@@ -211,7 +211,7 @@ class Overdues:
                             print(f'Excluded Registrar Hold Patron - Remove: {person["name"]} - ({person["barcode"]})')
 
                         with self.db.get_cursor() as cursor:
-                            cursor.run("UPDATE invoices SET waived = true WHERE ck_oid = %(a_id)s RETURNING hold_status, fee_status", a_id = allocation['oid'])
+                            cursor.run("DELETE FROM invoices WHERE ck_oid = %(a_id)s RETURNING hold_status, fee_status", a_id = allocation['oid'])
                             prev_status = cursor.fetchone()
 
                         self.db.run("UPDATE overdues SET hold_count = hold_count - %(hold_amount)s, " \
@@ -321,9 +321,8 @@ class Overdues:
                 ## Simpler solution for one given patron having multiple new invoices (both need to append)
                 ## Relatively few new invoices to process on a typical run so slightly slower updating is acceptable
 
-                ### NOTE: First time overdues are excluded from exceptional hold lengths (i.e. >5 overdues, etc.) All exceptional holds are placed based on "previous" status, not considering current overdues
                 ### NOTE: Overdue amount thresholds are Greater Than, not only once
-                ### NOTE: only update count and hold_count when not already processed by current_overdue_checkouts (i.e. had to create invoice)
+                ### NOTE: only update count and hold_count when not already processed by current_overdue_checkouts (i.e. had to create invoice) (if already stored, was already created)
                 # NOTE: CURRENT ISSUE: ambiguity in using current checkout count for determining hold length. If a checkout has been processed by process_current_overdues it will count the current amount, however if it hasn't, it wont.
                 # In _process_fines it will always take the current amount into account. Possible fixes: Make a query first to see if it's been processed before (i.e. invoice exists) and process differently depending on the result.
                 with self.db.get_cursor() as cursor:
@@ -332,8 +331,8 @@ class Overdues:
                                 "VALUES " \
                                     "(%(oid)s, %(i_count)s, %(hold_c)s, 0, CAST('%(hold_l)sD' AS INTERVAL), CAST(%(hold_rtime)s AS TIMESTAMP), %(i_id)s) " \
                                 "ON CONFLICT (patron_oid) DO " \
-                                    "UPDATE SET count = CASE WHEN %(i_id_plain)s = ANY(overdues.invoice_oids) THEN overdues.count + EXCLUDED.count ELSE overdues.count END, " \
-                                    "hold_count = CASE WHEN %(i_id_plain)s = ANY(overdues.invoice_oids) THEN overdues.hold_count + EXCLUDED.hold_count ELSE overdues.hold_count END, " \
+                                    "UPDATE SET count = CASE WHEN %(i_id_plain)s = ANY(overdues.invoice_oids) THEN overdues.count ELSE overdues.count + EXCLUDED.count END, " \
+                                    "hold_count = CASE WHEN %(i_id_plain)s = ANY(overdues.invoice_oids) THEN overdues.hold_count ELSE overdues.hold_count + EXCLUDED.hold_count END, " \
                                     "fee_count = overdues.fee_count - %(fee_c)s, " \
                                     "hold_length = CASE " \
                                         "WHEN overdues.count >= 12 " \
