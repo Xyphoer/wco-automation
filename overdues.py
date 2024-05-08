@@ -17,7 +17,7 @@ class Overdues:
         self._process_fines()
         self._remove_holds()
         self._process_current_overdues()
-        # add remove past 4 years func
+        self._process_expirations()
  
     def _connect_to_db(self, db_pass) -> Postgres:
         db = Postgres(f"dbname=postgres user=postgres password={db_pass}")
@@ -528,6 +528,14 @@ class Overdues:
                         "VALUES " \
                             "%(ins)s" \
                         "ON CONFLICT (allocation_oid) DO NOTHING", ins = insert_query.strip()[:-1])
+
+    def _process_expirations(self):
+        with self.db.get_cursor() as cursor:
+            cursor.run("DELETE FROM invoices WHERE exiration < 'NOW'::TIMESTAMP RETURNING count, patron_oid")
+            back = cursor.fetchone()
+
+        for count, oid in back:
+            self.db.run("UPDATE overdues SET count = count - %(r_count)s WHERE patron_oid = %(p_oid)s", r_count = count, p_oid = oid)
 
     # balance invoice and overdues databases
     # reconciling hold_length, hold_remove_time, hold_status, fee_status, and registrar_hold
