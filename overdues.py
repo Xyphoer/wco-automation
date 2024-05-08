@@ -17,6 +17,7 @@ class Overdues:
         self._process_fines()
         self._remove_holds()
         self._process_current_overdues()
+        # add remove past 4 years func
  
     def _connect_to_db(self, db_pass) -> Postgres:
         db = Postgres(f"dbname=postgres user=postgres password={db_pass}")
@@ -139,9 +140,10 @@ class Overdues:
     def _process_current_overdues(self):
         response = self.connection.get_current_overdue_allocations()
 
-        current_hold_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE hold_status')
-        current_fine_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE fee_status')
-        current_registrar_holds = self.db.all('SELECT ck_oid FROM invoices WHERE registrar_hold')
+        # somewhat wasteful. Possibly check only when needed
+        current_hold_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE hold_status AND NOT waived')
+        current_fine_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE fee_status AND NOT waived')
+        current_registrar_holds = self.db.all('SELECT ck_oid FROM invoices WHERE registrar_hold AND NOT waived')
         excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations')
 
         for allocation in response.json()['payload']['result']:
@@ -209,7 +211,7 @@ class Overdues:
                             print(f'Excluded Registrar Hold Patron - Remove: {person["name"]} - ({person["barcode"]})')
 
                         with self.db.get_cursor() as cursor:
-                            cursor.run("DELETE FROM invoices WHERE ck_oid = %(a_id)s RETURNING hold_status, fee_status", a_id = allocation['oid'])
+                            cursor.run("UPDATE invoices SET waived = true WHERE ck_oid = %(a_id)s RETURNING hold_status, fee_status", a_id = allocation['oid'])
                             prev_status = cursor.fetchone()
 
                         self.db.run("UPDATE overdues SET hold_count = hold_count - %(hold_amount)s, " \
