@@ -193,7 +193,7 @@ class Overdues:
                             # if this is their first registrar hold
                             if self.db.run("SELECT registrar_hold_count FROM overdues WHERE patron_oid = %(p_id)s", p_id = patron_oid) == 0:
                                 person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
-                                print(f'Registrar Hold needed for: {person["name"]} - ({person["barcode"]})')
+                                print(f'Registrar Hold needed for: {person["oid"]} -- {person["name"]} - ({person["barcode"]})')
                                 
                             self.db.run("UPDATE invoices SET registrar_hold = True WHERE invoice_oid = %(i_id)s", i_id = invoice_oid)
                             self.db.run("UPDATE overdues SET registrar_hold = registrar_hold + 1 WHERE patron_oid = %(p_id)s", p_id = patron_oid)
@@ -208,7 +208,7 @@ class Overdues:
                         person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
                         # if this is their only registrar hold
                         if self.db.run("SELECT registrar_hold_count FROM overdues WHERE patron_oid = %(p_id)s", p_id = patron_oid) == 1:
-                            print(f'Excluded Registrar Hold Patron - Remove: {person["name"]} - ({person["barcode"]})')
+                            print(f'Excluded Registrar Hold Patron - Remove: {person["oid"]} -- {person["name"]} - ({person["barcode"]})')
 
                         with self.db.get_cursor() as cursor:
                             cursor.run("DELETE FROM invoices WHERE ck_oid = %(a_id)s RETURNING hold_status, fee_status", a_id = allocation['oid'])
@@ -264,7 +264,8 @@ class Overdues:
                             registrar_status = 1 # used to decriment overall count
                             # check if only registrar hold on patrons account
                             if self.db.run("SELECT registrar_hold_count FROM overdues WHERE patron_oid = %(p_id)s", p_id = allocation['patron']['oid']) == 1:
-                                print(f"Items returned, registrar hold can be removed for oid: {allocation['patron']['oid']} -- {allocation['patron']['name']}")
+                                person = self.connection.get_patron(allocation['patron']['oid'], ['barcode']).json()['payload']
+                                print(f"Items returned, registrar hold can be removed for oid: {person['oid']} -- {person['name']} - ({person['barcode']})")
 
                             # included updating of db in overall updates
                             ##self.db.run("UPDATE invoices SET registrar_hold = False WHERE invoice_oid = %(i_id)s", i_id = entry[1])
@@ -424,10 +425,10 @@ class Overdues:
             invoice = self.connection.get_invoice(invoice_oid, ['datePaid', 'isHold']).json()['payload']
             if invoice['datePaid']:
 
-                name = self.connection.get_patron(patron_oid, ['name']).json()['payload']['name']
-                print(f"Patron oid: {patron_oid} -- paid fine -- {name} -- Return & Delete item")
+                patron = self.connection.get_patron(patron_oid, ['name', 'barcode']).json()['payload']
+                print(f"Patron oid: {patron_oid} -- paid fine -- {patron['name']} - ({patron['barcode']}) -- Return & Delete item")
                 if registrar_hold:
-                    print(f"Patron oid: {patron_oid} -- paid fine -- {name} -- Remove Registrar Hold")
+                    print(f"Patron oid: {patron_oid} -- paid fine -- {patron['name']} - ({patron['barcode']}) -- Remove Registrar Hold")
 
                 date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
 
