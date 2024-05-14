@@ -363,7 +363,7 @@ class Overdues:
                                     "END, " \
                                     "invoice_oids = CASE WHEN %(i_id_plain)s = ANY(overdues.invoice_oids) THEN overdues.invoice_oids ELSE overdues.invoice_oids || EXCLUDED.invoice_oids END, "\
                                     "registrar_hold_count = overdues.registrar_hold_count - %(r_hold_c)s " \
-                                "RETURNING hold_remove_time, overdues.count",
+                                "RETURNING hold_remove_time, CASE WHEN %(i_id_plain)s = ANY(overdues.invoice_oids) THEN overdues.count ELSE overdues.count + EXCLUDED.count END",
                                                             oid        = value[6]['patron']['oid'],
                                                             i_count    = value[0],
                                                             hold_c     = 1 if value[1]=='True' else 0,
