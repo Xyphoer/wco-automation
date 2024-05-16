@@ -24,7 +24,7 @@ class Overdues:
         db.run("CREATE EXTENSION IF NOT EXISTS intarray") # required for subracting array of ints from array of ints
         db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_count INTEGER DEFAULT 0, fee_count INTEGER DEFAULT 0, hold_length INTERVAL DEFAULT CAST('0' AS INTERVAL), hold_remove_time TIMESTAMP, invoice_oids INTEGER[], registrar_hold_count INTEGER DEFAULT 0)")
         db.run("CREATE TABLE IF NOT EXISTS invoices (invoice_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, registrar_hold BOOLEAN DEFAULT FALSE, hold_length INTERVAL DEFAULT CAST('0' AS INTERVAL), hold_remove_time TIMESTAMP, ck_oid INTEGER, patron_oid INTEGER, waived BOOLEAN DEFAULT FALSE, expiration TIMESTAMP)")
-        db.run("CREATE TABLE IF NOT EXISTS excluded_allocations (allocation_oid INTEGER PRIMARY KEY, timeout TIMESTAMP)")
+        db.run("CREATE TABLE IF NOT EXISTS excluded_allocations (allocation_oid INTEGER PRIMARY KEY, processed TIMESTAMP)")
         db.run("CREATE TABLE IF NOT EXISTS history (time_ran TIMESTAMP, log_file TEXT)")
         return db
     
@@ -199,25 +199,6 @@ class Overdues:
                             self.db.run("UPDATE overdues SET registrar_hold = registrar_hold + 1 WHERE patron_oid = %(p_id)s", p_id = patron_oid)
                     if invoice:
                         self.connection.email_invoice(invoice)
-
-            elif allocation['oid'] in excluded_checkouts:
-                invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid=%(a_id)s', a_id = allocation['oid'])
-                if invoice_oid:
-                    self.remove_hold(invoice_oid)
-                    if consequences['Registrar Hold'] and allocation['oid'] in current_registrar_holds:
-                        person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
-                        # if this is their only registrar hold
-                        if self.db.run("SELECT registrar_hold_count FROM overdues WHERE patron_oid = %(p_id)s", p_id = patron_oid) == 1:
-                            print(f'Excluded Registrar Hold Patron - Remove: {person["oid"]} -- {person["name"]} - ({person["barcode"]})')
-
-                        with self.db.get_cursor() as cursor:
-                            cursor.run("DELETE FROM invoices WHERE ck_oid = %(a_id)s RETURNING hold_status, fee_status", a_id = allocation['oid'])
-                            prev_status = cursor.fetchone()
-
-                        self.db.run("UPDATE overdues SET hold_count = hold_count - %(hold_amount)s, " \
-                                        "fee_count = fee_count - %(fee_amount)s, " \
-                                        "registrar_hold = registrar_hold - 1 " \
-                                    "WHERE patron_oid = %(p_id)s", hold_amount = int(prev_status[0]), fee_amount = int(prev_status[1]), p_id = patron_oid) # convert previous hold/fee status to 1/0 for updating overdues (should always be 1)
         
         try:
             self.texting.ticketify()
@@ -529,14 +510,49 @@ class Overdues:
                         "VALUES " \
                             "%(ins)s" \
                         "ON CONFLICT (allocation_oid) DO NOTHING", ins = insert_query.strip()[:-1])
+        
+        # process un-processed excluded_allocations (should just be the newly added ones above)
+        un_processed_allocs = self.db.all("SELECT allocation_oid FROM excluded_allocations WHERE processed IS NULL")
+
+        # if the allocations has previously been processed, need to remove that processing
+        pre_processed = self.db.all("SELECT invoice_oid, patron_oid, ck_oid, registrar_hold FROM invoices WHERE ck_oid IN %(a_id)s", a_id = un_processed_allocs)
+        for i_oid, p_oid, ck_oid, registrar_status in pre_processed:
+            self.remove_hold(i_oid)
+            if registrar_status:
+                # if this is their only registrar hold
+                if self.db.run("SELECT registrar_hold_count FROM overdues WHERE patron_oid = %(p_id)s", p_id = p_oid) == 1:
+                    person = self.connection.get_patron(p_oid, ['barcode']).json()['payload']
+                    print(f'Excluded Registrar Hold Patron - Remove: {p_oid} -- {person["name"]} - ({person["barcode"]})')
+
+            with self.db.get_cursor() as cursor:
+                cursor.run("DELETE FROM invoices WHERE ck_oid = %(ck_oid)s RETURNING hold_status, fee_status", ck_oid = ck_oid)
+                prev_status = cursor.fetchone()
+                
+            self.db.run("UPDATE overdues SET hold_count = hold_count - %(hold_amount)s, " \
+                            "fee_count = fee_count - %(fee_amount)s, " \
+                            "registrar_hold = registrar_hold - %(reg_hold)s " \
+                        "WHERE patron_oid = %(p_id)s",
+                            hold_amount = int(prev_status[0]),
+                            fee_amount = int(prev_status[1]),
+                            reg_hold = int(registrar_status),
+                            p_id = p_oid) # convert previous hold/fee/registrar status to 1/0 for updating overdues
+        
+        self.db.run("UPDATE excluded_allocations SET processed = %(proc_date)s WHERE allocation_oid IN %(a_id)s",
+                        proc_date = datetime.now(), a_id = un_processed_allocs)
 
     def _process_expirations(self):
+        # process expired invoices
         with self.db.get_cursor() as cursor:
             cursor.run("DELETE FROM invoices WHERE exiration < 'NOW'::TIMESTAMP RETURNING count, patron_oid")
             back = cursor.fetchone()
 
         for count, oid in back:
             self.db.run("UPDATE overdues SET count = count - %(r_count)s WHERE patron_oid = %(p_oid)s", r_count = count, p_oid = oid)
+        
+        # process expired exluded allocations (expire 1 year after being processed)
+        with self.db.get_cursor() as cursor:
+            cursor.run("DELETE FROM excluded_allocations WHERE processed + '1Y'::INTERVAL < 'NOW'::TIMESTAMP RETURNING allocation_oid")
+            back = cursor.fetchone() # to be used for logging
 
     # balance invoice and overdues databases
     # reconciling hold_length, hold_remove_time, hold_status, fee_status, and registrar_hold
