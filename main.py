@@ -188,9 +188,11 @@ try:
             overdues_end = input("Overdues End Date: ")
             overdues_end_dt = datetime.strptime(overdues_end, '%m/%d/%Y') if '/' in overdues_end else datetime.now()
             overdues_start_end_diff = overdues_end_dt - overdues_start_dt
-            overdues_correct_date_range = input(f"Start Date of {overdues_start} is {overdues_start_end_diff.days} days, {overdues_start_end_diff.seconds // 3600} hours from end time of {overdues_end}. Is this correct? [y/n]: ")
+            overdues_correct_date_range = input(f"Start Date of {overdues_start_dt.isoformat(sep=' ', timespec='seconds')} is " \
+                                                f"{overdues_start_end_diff.days} days, {overdues_start_end_diff.seconds // 3600} hours from end time of " \
+                                                f"{overdues_end_dt.isoformat(sep=' ', timespec='seconds')}. Is this correct? [y/n]: ")
         
-        print(f"Processing overdues with start date {overdues_start}, end date {overdues_end if overdues_end else 'Now'}...")
+        print(f"Processing overdues with start date {overdues_start_dt.isoformat(sep=' ', timespec='seconds')}, end date {overdues_start_dt.isoformat(sep=' ', timespec='seconds')}...")
 
         oconn.excluded_allocations(input("Excluded allocations (whitespace seperation): "))
         oconn.update(overdues_start_dt, overdues_end_dt)
