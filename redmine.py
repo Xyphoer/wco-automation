@@ -16,10 +16,12 @@ class RedmineConnection:
         self.custom_field = {'id': 137, 'name': 'Computer Lab'}
 
         self.session = requests.Session()
+        self.session.headers = {'X-Redmine-API-Key': self.redmine_auth_key}
 
-        self.session.cookies.set('_redmine_session', redmine_session_cookie)
-        self.session.cookies.set(shib_session_cookie_name, shib_session_cookie_value)
+        # self.session.cookies.set('_redmine_session', redmine_session_cookie)
+        # self.session.cookies.set(shib_session_cookie_name, shib_session_cookie_value)
 
+    # depricated
     def process_working_overdues(self, project_query_ext):
         response = self.session.get(url=self.host + project_query_ext, auth=(self.redmine_auth_key, ''))
 
@@ -282,7 +284,7 @@ class Texting(RedmineConnection):
                         phone_numbers.append(f"{checkout['uniqueId']} - {checkout['patron']['name']} - No phone number found")
 
                 # check for open tickets
-                existing_ticket = self.session.get(url = self.host + f"/search.json?q={checkout['uniqueId']}&scope=my_project", auth=(self.redmine_auth_key, '')).json()
+                existing_ticket = self.session.get(url = self.host + f"/search.json?q={checkout['uniqueId']}&scope=my_project").json()
                 found = False
 
                 if existing_ticket['total_count']:
@@ -303,8 +305,7 @@ class Texting(RedmineConnection):
                             print(f'Ticket #{result["id"]} updated with:\n{update_text}\n')
                             
                             if not phone_number:
-                                curr_ticket = self.session.get(url=f'https://redmine.library.wisc.edu/issues/{result["id"]}.json',
-                                                auth=(self.redmine_auth_key, '')).json()
+                                curr_ticket = self.session.get(url=f'https://redmine.library.wisc.edu/issues/{result["id"]}.json').json()
                                 
                                 number_pos = curr_ticket['issue']['description'].find('Phone #:')
 
@@ -331,7 +332,6 @@ class Texting(RedmineConnection):
                                             f"- Texted {time_now.strftime('%m/%d/%Y')}\n\n")
 
                     new_ticket = self.session.post(url=f'https://redmine.library.wisc.edu/issues.json',
-                                    auth=(self.redmine_auth_key, ''),
                                     json={'issue': {'project_id': self.project_id,
                                                     'status_id': 10, # resolved
                                                     'custom_fields': [{"value": center.title(), "id": self.custom_field['id']}],

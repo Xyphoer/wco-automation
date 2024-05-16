@@ -46,10 +46,7 @@ wco_host = ''
 wco_userid = ''
 wco_password = ''
 redmine_host = ''
-redmine_session_cookie = ''
 redmine_auth_key = ''
-shibsession_cookie_name = ''
-shibsession_cookie_value = ''
 project_query_ext = ''
 
 try:
@@ -63,12 +60,6 @@ try:
                 wco_password = line.split("=", maxsplit=1)[1].strip()
             elif "redmine_host" in line.lower():
                 redmine_host = line.split("=", maxsplit=1)[1].strip()
-            elif "redmine_session_cookie" in line.lower():
-                redmine_session_cookie = line.split("=", maxsplit=1)[1].strip()
-            elif "shibsession_cookie_name" in line.lower():
-                shibsession_cookie_name = line.split("=", maxsplit=1)[1].strip()
-            elif "shibsession_cookie_value" in line.lower():
-                shibsession_cookie_value = line.split("=", maxsplit=1)[1].strip()
             elif "redmine_auth_key" in line.lower():
                 redmine_auth_key = line.split("=", maxsplit=1)[1].strip()
             elif "project_query_ext" in line.lower():
@@ -81,9 +72,6 @@ except OSError as e:  # file not found or permission error
         wco_userid = input("WebCheckout user id: ")
         wco_password = input("WebCheckout Password: ")
         redmine_host = input("Redmine host: ")
-        redmine_session_cookie = input("redmine_session_cookie: ")
-        shibsession_cookie_name = input("_shibsession cookie name: ")
-        shibsession_cookie_value = input("_shibsession cookie value: ")
 
 finally:
     if not wco_host:
@@ -150,7 +138,9 @@ try:
 
         print("\n".join(ss_results_list))
     
+    # depricated
     if args.redmine_update:
+        break # depricated - to remove/rework
         print("Performing redmine update...\n")
 
         if not redmine_host:
