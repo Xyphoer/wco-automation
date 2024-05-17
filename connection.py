@@ -92,6 +92,18 @@ class Connection:
         sorted_allocs.sort(key = lambda person: person['patron']['oid'])
 
         return sorted_allocs
+
+    def get_patron_checkouts(self, patron_oid: int, properties = []):
+        patron = self.get_patron(patron_oid).json()['payload']
+        if properties:
+            return self.request_session.post(url = self.host + "/rest/allocation/search",
+                                             headers = {"Authorization": "Bearer " + self.session_token},
+                                             json = {"properties": properties,
+                                                     "query": {"patron": patron}})
+        else:
+            return self.request_session.post(url = self.host + "/rest/allocation/search",
+                                             headers = {"Authorization": "Bearer " + self.session_token},
+                                             json = {"query": {"patron": patron}})
     
     def get_new_overdues(self, center) -> list:
         allocs = []
