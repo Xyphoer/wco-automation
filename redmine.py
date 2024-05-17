@@ -5,7 +5,7 @@ from datetime import datetime, timezone, timedelta
 
 class RedmineConnection:
 
-    def __init__(self, wco_connection: Connection, host: str, shib_session_cookie_name: str, shib_session_cookie_value: str, redmine_session_cookie: str, redmine_auth_key: str):
+    def __init__(self, wco_connection: Connection, host: str, redmine_auth_key: str):
         self.wco_connection = wco_connection
         self.host = host
         self.redmine_auth_key = redmine_auth_key

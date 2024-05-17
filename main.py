@@ -140,26 +140,26 @@ try:
     
     # depricated
     if args.redmine_update:
-        break # depricated - to remove/rework
-        print("Performing redmine update...\n")
+        pass # depricated - to remove/rework
+        # print("Performing redmine update...\n")
 
-        if not redmine_host:
-            redmine_host = input("redmine host: ")
-        if not shibsession_cookie_name:
-            wco_userid = input("shibsession cookie name: ")
-        if not shibsession_cookie_value:
-            wco_password = input("shibsession cookie value: ")
-        if not redmine_session_cookie:
-            redmine_host = input("redmine session cookie: ")
-        if not redmine_auth_key:
-            wco_userid = input("redmine auth key: ")
-        if not project_query_ext:
-            project_query_ext = input("project query ext: ")
+        # if not redmine_host:
+        #     redmine_host = input("redmine host: ")
+        # if not shibsession_cookie_name:
+        #     wco_userid = input("shibsession cookie name: ")
+        # if not shibsession_cookie_value:
+        #     wco_password = input("shibsession cookie value: ")
+        # if not redmine_session_cookie:
+        #     redmine_host = input("redmine session cookie: ")
+        # if not redmine_auth_key:
+        #     wco_userid = input("redmine auth key: ")
+        # if not project_query_ext:
+        #     project_query_ext = input("project query ext: ")
 
-        rm_connection = RedmineConnection(wco_connection, redmine_host, shibsession_cookie_name, shibsession_cookie_value, redmine_session_cookie, redmine_auth_key)
+        # rm_connection = RedmineConnection(wco_connection, redmine_host, shibsession_cookie_name, shibsession_cookie_value, redmine_session_cookie, redmine_auth_key)
 
-        rm_connection.process_working_overdues(project_query_ext=project_query_ext)
-        rm_connection.process_new_overdues(start=args.redmine_update[0], end=args.redmine_update[1], centers=args.redmine_update[2:])
+        # rm_connection.process_working_overdues(project_query_ext=project_query_ext)
+        # rm_connection.process_new_overdues(start=args.redmine_update[0], end=args.redmine_update[1], centers=args.redmine_update[2:])
     
     if args.checkout_emails:
         print(f"Getting emails for open checkouts from {args.checkout_emails[0]} to {args.checkout_emails[1]} at center: {args.checkout_emails[2]}...\n")
@@ -170,7 +170,7 @@ try:
     
     if args.process_overdues:
         overdues_correct_date_range = ''
-        texting = Texting(wco_connection, redmine_host, shibsession_cookie_name, shibsession_cookie_value, redmine_session_cookie, redmine_auth_key)
+        texting = Texting(wco_connection, redmine_host, redmine_auth_key)
         oconn = Overdues(wco_connection, utils(wco_connection), texting, postgres_pass)
         while overdues_correct_date_range.lower()[:1] != 'y':
             overdues_start = input("Overdues Start Date (mm/dd/yyyy): ")
