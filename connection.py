@@ -38,8 +38,8 @@ class Connection:
             "memorial": self.memorial,
             "merit": self.merit}
 
-        # set the scope to College to start
-        self.scope = self.set_scope()
+        # set the scope to LTG org to start
+        self.scope = self.set_scope(self.college['organization']['oid'])
 
     #####
     # Name: start_session
@@ -56,14 +56,14 @@ class Connection:
 
     #####
     # Name: set_scope
-    # Inputs: None
+    # Inputs: _class ("organization" or "checkout-center"), location_oid (int)
     # Output: Scope information
     # Description: Sets the scope of the session to College Library
     #####
-    def set_scope(self):
+    def set_scope(self, location_oid: int, _class: str = "organization"):
         return self.request_session.post(url = self.host + "/rest/session/setSessionScope",
                       headers = {"Authorization": "Bearer " + self.session_token},
-                      json = {"checkoutCenter": {"_class": "checkout-center", "oid": self.college['organization']['oid']}})
+                      json = {"checkoutCenter": {"_class": _class, "oid": location_oid}})
     
     #####
     # Name: get_checkouts
@@ -191,6 +191,48 @@ class Connection:
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"oid": patron_oid,
                                     "properties": ["defaultAccount"]})
+    
+    def get_resource(self, resource_oid: int, properties = []):
+        if properties:
+            return self.request_session.post(url = self.host + "/rest/resource/get",
+                                            headers = {"Authorization": "Bearer " + self.session_token},
+                                            json = {"oid": resource_oid,
+                                                    "properties": properties})
+        else:
+            return self.request_session.post(url = self.host + "/rest/resource/get",
+                                            headers = {"Authorization": "Bearer " + self.session_token},
+                                            json = {"oid": resource_oid})
+    
+    def get_allocation(self, allocation_oid: int, properties = []):
+        if properties:
+            return self.request_session.post(url = self.host + "/rest/allocation/get",
+                                            headers = {"Authorization": "Bearer " + self.session_token},
+                                            json = {"oid": allocation_oid,
+                                                    "properties": properties})
+        else:
+            return self.request_session.post(url = self.host + "/rest/allocation/get",
+                                            headers = {"Authorization": "Bearer " + self.session_token},
+                                            json = {"oid": allocation_oid})
+    
+    def return_allocation(self, allocation):
+        return self.request_session.post(url = self.host + "/rest/allocation/returnAllocation",
+                                         headers = {"Authorization": "Bearer " + self.session_token},
+                                         json = {"allocation": allocation})
+    
+    def delete_resource(self, resource_oid: int):
+        delete_check = self.get_resource(resource_oid, ['deletable', 'deleted']).json()
+        deletable, deleted = delete_check['payload']['deletable'], delete_check['payload']['deleted']
+
+        # make more consistent return
+        if deleted:
+            return "already deleted"
+        elif not deletable:
+            return "cannot delete"
+        else:
+            return self.request_session.post(url = self.host + "/rest/resource/update",
+                                             headers = {"Authorization": "Bearer " + self.session_token},
+                                             json = {"oid": resource_oid,
+                                                     "values": {"deleted": True}})
     
     def get_completed_overdue_allocations(self, start_time: datetime, end_time: datetime):
         earliest_actual_end = start_time.isoformat()
