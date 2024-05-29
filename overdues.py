@@ -517,19 +517,29 @@ class Overdues:
                                             }
                                         ]
                     }]).json()
-                for item in alloc.json()['payload']['items']:
+                
+                self.connection.return_allocation(alloc['payload'])
+
+                for item in alloc['payload']['items']:
+                    rem = self.connection.delete_resource(item['resource']['oid'])
+                    if type(rem) == str:
+                        print(alloc['payload']['oid'], rem)
+
                     csv.write(', '.join([str(item['resource']['oid']),
                                         item['name'],
                                         str(item['resource']['serialNumber']),
                                         item['resource']['barcode'],
                                         ''.join(item['resource']['resourceTypePath']),
                                         datetime.strptime(item['resource']['creationDate'], '%Y-%m-%dT%H:%M:%S.%f%z').isoformat(sep=' ', timespec='seconds'),
-                                        str(alloc.json()['payload']['oid']),
-                                        alloc.json()['payload']['uniqueId'],
-                                        str(alloc.json()['payload']['patron']['oid']),
-                                        alloc.json()['payload']['patron']['name'],
-                                        alloc.json()['payload']['patron']['barcode'],
-                                        datetime.strptime(alloc.json()['payload']['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z').isoformat(sep=' ', timespec='seconds')]) + '\n')
+                                        alloc['payload']['uniqueId'],
+                                        alloc['payload']['patron']['name'],
+                                        alloc['payload']['patron']['barcode']]) + '\n')
+        
+        allocations = input("Lost Returned allocations (whitespace seperation): ")
+        allocation_list = allocations.split()
+        insert_query = ""
+        for allocation in allocation_list:
+            alloc_oid = self.connection.get_checkout(id=allocation if not allocation.isdigit() else 'CK-' + allocation).json()['payload']['result'][0]['oid']
         
     
     def excluded_allocations(self, allocations: str):
