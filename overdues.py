@@ -18,6 +18,7 @@ class Overdues:
         self._remove_holds()
         self._process_current_overdues()
         self._process_expirations()
+        self._process_lost()
  
     def _connect_to_db(self, db_pass) -> Postgres:
         db = Postgres(f"dbname=postgres user=postgres password={db_pass}")
@@ -500,7 +501,36 @@ class Overdues:
                         "WHERE invoice_oid IN %(i_ids)s", i_ids = tuple(invoice_oids))
     
     def _process_lost(self):
-        lost_overdues = self.db.all('SELECT ck_oid FROM invoices WHERE ')
+        lost_overdues = self.db.all("SELECT ck_oid FROM invoices WHERE overdues_start_date < 'NOW'::TIMESTAMP - '6Months'::INTERVAL AND NOT overdue_lost")
+        
+        with open(f'Lost Logs/Lost Items {datetime.now().isoformat(timespec='seconds').replace(':','_')}.csv', 'w') as csv:
+            csv.write('item oid, item name, item serial number, item barcode, item type path, item creation date, checkout oid, checkout id, patron oid, patron name, patron wiscard, due date\n')
+            
+            for allocation_oid in lost_overdues:
+                alloc = self.connection.get_allocation(allocation_oid, ['uniqueId', 'scheduledEndTime',
+                    {'property': 'patron',
+                        'subProperties': ['name', 'barcode']},
+                    {'property': 'items',
+                        'subProperties': ['name',
+                                            {'property': 'resource',
+                                                'subProperties': ['serialNumber', 'creationDate', 'resourceTypePath', 'barcode']
+                                            }
+                                        ]
+                    }]).json()
+                for item in alloc.json()['payload']['items']:
+                    csv.write(', '.join([str(item['resource']['oid']),
+                                        item['name'],
+                                        str(item['resource']['serialNumber']),
+                                        item['resource']['barcode'],
+                                        ''.join(item['resource']['resourceTypePath']),
+                                        datetime.strptime(item['resource']['creationDate'], '%Y-%m-%dT%H:%M:%S.%f%z').isoformat(sep=' ', timespec='seconds'),
+                                        str(alloc.json()['payload']['oid']),
+                                        alloc.json()['payload']['uniqueId'],
+                                        str(alloc.json()['payload']['patron']['oid']),
+                                        alloc.json()['payload']['patron']['name'],
+                                        alloc.json()['payload']['patron']['barcode'],
+                                        datetime.strptime(alloc.json()['payload']['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z').isoformat(sep=' ', timespec='seconds')]) + '\n')
+        
     
     def excluded_allocations(self, allocations: str):
         allocation_list = allocations.split()
