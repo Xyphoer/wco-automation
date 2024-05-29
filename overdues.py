@@ -23,7 +23,7 @@ class Overdues:
         db = Postgres(f"dbname=postgres user=postgres password={db_pass}")
         db.run("CREATE EXTENSION IF NOT EXISTS intarray") # required for subracting array of ints from array of ints
         db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_count INTEGER DEFAULT 0, fee_count INTEGER DEFAULT 0, hold_length INTERVAL DEFAULT CAST('0' AS INTERVAL), hold_remove_time TIMESTAMP, invoice_oids INTEGER[], registrar_hold_count INTEGER DEFAULT 0)")
-        db.run("CREATE TABLE IF NOT EXISTS invoices (invoice_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, registrar_hold BOOLEAN DEFAULT FALSE, hold_length INTERVAL DEFAULT CAST('0' AS INTERVAL), hold_remove_time TIMESTAMP, ck_oid INTEGER, patron_oid INTEGER, waived BOOLEAN DEFAULT FALSE, expiration TIMESTAMP overdue_lost BOOLEAN DEFAULT FALSE)")
+        db.run("CREATE TABLE IF NOT EXISTS invoices (invoice_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, registrar_hold BOOLEAN DEFAULT FALSE, hold_length INTERVAL DEFAULT CAST('0' AS INTERVAL), overdue_start_time TIMESTAMP, hold_remove_time TIMESTAMP, ck_oid INTEGER, patron_oid INTEGER, waived BOOLEAN DEFAULT FALSE, expiration TIMESTAMP overdue_lost BOOLEAN DEFAULT FALSE)")
         db.run("CREATE TABLE IF NOT EXISTS excluded_allocations (allocation_oid INTEGER PRIMARY KEY, processed TIMESTAMP)")
         db.run("CREATE TABLE IF NOT EXISTS history (time_ran TIMESTAMP, log_file TEXT)")
         return db
@@ -46,7 +46,7 @@ class Overdues:
     # (Turn into place_invoice and have hold & fine?) place hold and update db. NOTE: Done -- This does not update overdue count, just the hold status.
     # automatically sends an email based on WCO settins
     # On new - by checkout - process
-    def place_hold(self, oid: int, checkout_center, allocation = None, end = None, message = '', update_db = True):
+    def place_hold(self, oid: int, checkout_center, allocation = None, end = None, overdue_time = None, message = '', update_db = True):
         account = self.connection.get_account(oid).json()
         overdue_count = self.db.one(f"SELECT count FROM overdues WHERE patron_oid = {oid}")
         invoice = self.connection.create_invoice(account['payload']['defaultAccount'], account['session']['organization'], checkout_center, allocation=allocation,
@@ -60,15 +60,15 @@ class Overdues:
             print(f"Failed to create invoice for patron with oid {oid}")  # should be better
 
         if update_db:
-            # get length of hold in float of days
-            diff = end - datetime.now()
-            hold_length = (diff.days if diff.days > 0 else 0) + round(diff.seconds / 60 / 60 / 24, 3) if end else 0
-
             if end:
+                # get length of hold in float of days
+                diff = end - datetime.now()
+                hold_length = (diff.days if diff.days > 0 else 0) + round(diff.seconds / 60 / 60 / 24, 3) if end else 0
+
                 # perhaps edit overdues table first (add overdue length), return the new hold_remove_time from that, which is now the hold remove time of the invoice table
                 with self.db.get_cursor() as cursor:
                     cursor.run("INSERT INTO " \
-                                    "overdues (patron_oid, hold_count, hold_length, hold_remove_time, invoice_oids)" \
+                                    "overdues (patron_oid, hold_count, hold_length hold_remove_time, invoice_oids)" \
                                 "VALUES " \
                                     "(%(oid)s, 1, CAST('%(hold_l)sD' AS INTERVAL), CAST(%(hold_rtime)s AS TIMESTAMP), %(i_id)s) " \
                                 "ON CONFLICT (patron_oid) DO " \
@@ -78,13 +78,13 @@ class Overdues:
                     back_hold_remove_time = cursor.fetchone()[0] # gives datetime.datetime object for extended hold_remove time of sequential invoices
                 
                 self.db.run("INSERT INTO " \
-                                "invoices (invoice_oid, hold_status, hold_length, hold_remove_time, ck_oid, patron_oid)" \
+                                "invoices (invoice_oid, hold_status, hold_length, overdue_start_time, hold_remove_time, ck_oid, patron_oid)" \
                             "VALUES " \
-                                "(%(i_id)s, %(hold_s)s, CAST('%(hold_l)sD' AS INTERVAL), CAST(%(hold_rtime)s AS TIMESTAMP), %(c_id)s, %(oid)s) " \
+                                "(%(i_id)s, %(hold_s)s, CAST('%(hold_l)sD' AS INTERVAL),  CAST(%(hold_rtime)s AS TIMESTAMP), %(c_id)s, %(oid)s) " \
                             "ON CONFLICT (invoice_oid) DO " \
-                                "UPDATE SET hold_status = EXCLUDED.hold_status, hold_length = EXCLUDED.hold_length, " \
+                                "UPDATE SET hold_status = EXCLUDED.hold_status, hold_length = EXCLUDED.hold_length, overdue_start_time = EXCLUDED.overdue_start_time" \
                                     "hold_remove_time = EXCLUDED.hold_remove_time, ck_oid = EXCLUDED.ck_oid, patron_oid = EXCLUDED.patron_oid",
-                            i_id = invoice_oid, hold_s=True, hold_l=hold_length, hold_rtime=back_hold_remove_time, c_id = ck_oid, oid=oid)
+                            i_id = invoice_oid, hold_s=True, hold_l=hold_length, o_stime=overdue_time, hold_rtime=back_hold_remove_time, c_id = ck_oid, oid=oid)
 
             # For no end, process same. 0D will be added to interval and to hold_remove_time. Invoice table entry will have 0 day and no hold_remove_time. Add to overall when returned.
             # Also, keep hold_status/fee_status = true even if hold_length is 0 and hold_remove_time is NULL. Only remove when all invoice oids have been removed.
@@ -98,12 +98,12 @@ class Overdues:
                             "RETURNING hold_remove_time", oid=oid, i_id=str({invoice_oid}))
                 
                 self.db.run("INSERT INTO " \
-                                "invoices (invoice_oid, hold_status, ck_oid, patron_oid)" \
+                                "invoices (invoice_oid, hold_status, ck_oid, patron_oid, overdue_start_time)" \
                             "VALUES " \
-                                "(%(i_id)s, %(hold_s)s, %(c_id)s, %(oid)s) " \
+                                "(%(i_id)s, %(hold_s)s, %(c_id)s, %(oid)s, CAST(%(o_stime)s AS TIMESTAMP)) " \
                             "ON CONFLICT (invoice_oid) DO " \
-                                "UPDATE SET hold_status = EXCLUDED.hold_status, ck_oid = EXCLUDED.ck_oid, patron_oid = EXCLUDED.patron_oid",
-                            i_id = invoice_oid, hold_s=True, c_id = ck_oid, oid=oid)
+                                "UPDATE SET hold_status = EXCLUDED.hold_status, ck_oid = EXCLUDED.ck_oid, patron_oid = EXCLUDED.patron_oid, overdue_start_time = EXCLUDED.overdue_start_time",
+                            i_id = invoice_oid, hold_s=True, c_id = ck_oid, oid=oid, o_stime=overdue_time)
         
         return invoice['payload']
 
@@ -167,7 +167,7 @@ class Overdues:
                 if consequences['Hold'] and allocation['oid'] not in excluded_checkouts:
                     invoice = False
                     if allocation['oid'] not in current_hold_allocs:  # only process a checkout once
-                        invoice = self.place_hold(patron_oid, center)
+                        invoice = self.place_hold(patron_oid, center, allocation, overdue_time=scheduled_end)
                         invoice_oid = invoice['oid']
 
                         try:
@@ -215,8 +215,8 @@ class Overdues:
         insert_dict = {}
 
         self.db.run(f"INSERT INTO history (time_ran) VALUES ('{end_search_time.isoformat()}')") # should isolate to own function running at end
-        current_hold_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE hold_status AND NOT waived')  # should tidy up and not do one big query, but single ones when needed
-        current_fine_allocs = self.db.all('SELECT ck_oid, invoice_oid FROM invoices WHERE fee_status AND NOT waived')
+        current_hold_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE hold_status AND NOT (waived OR overdue_lost)')  # should tidy up and not do one big query, but single ones when needed
+        current_fine_allocs = self.db.all('SELECT ck_oid, invoice_oid FROM invoices WHERE fee_status AND NOT (waived OR overdue_lost)')
         excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations')
 
         response = self.connection.get_completed_overdue_allocations(start_search_time, end_search_time)
@@ -376,15 +376,16 @@ class Overdues:
                     #### patron_oid: No change: Both should be the same
                     #### registrar_hold: Should be removed.
                     self.db.run("INSERT INTO " \
-                                    "invoices (invoice_oid, count, hold_status, fee_status, hold_length, hold_remove_time, ck_oid, patron_oid, expiration) " \
+                                    "invoices (invoice_oid, count, hold_status, fee_status, hold_length, overdue_start_time, hold_remove_time, ck_oid, patron_oid, expiration) " \
                                 "VALUES " \
-                                    "(%(i_id)s, %(i_count)s, %(hold_s)s, False, CAST('%(hold_l)sD' AS INTERVAL), CAST(%(hold_rtime)s AS TIMESTAMP), %(c_oid)s, %(p_oid)s, '%(expire)s'::TIMESTAMP)" \
+                                    "(%(i_id)s, %(i_count)s, %(hold_s)s, False, CAST('%(hold_l)sD' AS INTERVAL), CAST(%(o_stime)s AS TIMESTAMP), CAST(%(hold_rtime)s AS TIMESTAMP), %(c_oid)s, %(p_oid)s, '%(expire)s'::TIMESTAMP)" \
                                 "ON CONFLICT (invoice_oid) DO " \
-                                    "UPDATE SET fee_status = EXCLUDED.fee_status, hold_length = EXCLUDED.hold_length, " \
+                                    "UPDATE SET fee_status = EXCLUDED.fee_status, hold_length = EXCLUDED.hold_length, overdue_start_time = EXCLUDED.overdue_start_time" \
                                     "hold_remove_time = EXCLUDED.hold_remove_time, registrar_hold = False", i_id = invoice_oid,
                                                                                                             i_count = value[0],
                                                                                                             hold_s = value[1],
                                                                                                             hold_l = hold_len,
+                                                                                                            o_stime = datetime.strptime(value[6]['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z'),
                                                                                                             hold_rtime = back_hold_remove_time,
                                                                                                             c_oid = key,
                                                                                                             p_oid = value[6]['patron']['oid'],
@@ -497,6 +498,9 @@ class Overdues:
             self.db.run("UPDATE invoices SET " \
                             "WAIVED = true " \
                         "WHERE invoice_oid IN %(i_ids)s", i_ids = tuple(invoice_oids))
+    
+    def _process_lost(self):
+        lost_overdues = self.db.all('SELECT ck_oid FROM invoices WHERE ')
     
     def excluded_allocations(self, allocations: str):
         allocation_list = allocations.split()
