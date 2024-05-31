@@ -234,6 +234,12 @@ class Connection:
                                              json = {"oid": resource_oid,
                                                      "values": {"deleted": True}})
     
+    def undelete_resource(self, resource_oid: int):
+        return self.request_session.post(url = self.host + "/rest/resource/update",
+                                            headers = {"Authorization": "Bearer " + self.session_token},
+                                            json = {"oid": resource_oid,
+                                                    "values": {"deleted": False}})
+    
     def get_completed_overdue_allocations(self, start_time: datetime, end_time: datetime):
         earliest_actual_end = start_time.isoformat()
         latest_scheduled_end = (start_time - timedelta(minutes=10)).isoformat()  # 10 minute grace period

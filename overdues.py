@@ -81,7 +81,7 @@ class Overdues:
                 self.db.run("INSERT INTO " \
                                 "invoices (invoice_oid, hold_status, hold_length, overdue_start_time, hold_remove_time, ck_oid, patron_oid)" \
                             "VALUES " \
-                                "(%(i_id)s, %(hold_s)s, CAST('%(hold_l)sD' AS INTERVAL),  CAST(%(hold_rtime)s AS TIMESTAMP), %(c_id)s, %(oid)s) " \
+                                "(%(i_id)s, %(hold_s)s, CAST('%(hold_l)sD' AS INTERVAL), CAST(%(o_stime)s AS TIMESTAMP), CAST(%(hold_rtime)s AS TIMESTAMP), %(c_id)s, %(oid)s) " \
                             "ON CONFLICT (invoice_oid) DO " \
                                 "UPDATE SET hold_status = EXCLUDED.hold_status, hold_length = EXCLUDED.hold_length, overdue_start_time = EXCLUDED.overdue_start_time" \
                                     "hold_remove_time = EXCLUDED.hold_remove_time, ck_oid = EXCLUDED.ck_oid, patron_oid = EXCLUDED.patron_oid",
@@ -218,7 +218,7 @@ class Overdues:
         self.db.run(f"INSERT INTO history (time_ran) VALUES ('{end_search_time.isoformat()}')") # should isolate to own function running at end
         current_hold_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE hold_status AND NOT (waived OR overdue_lost)')  # should tidy up and not do one big query, but single ones when needed
         current_fine_allocs = self.db.all('SELECT ck_oid, invoice_oid FROM invoices WHERE fee_status AND NOT (waived OR overdue_lost)')
-        excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations')
+        excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations').append(self.db.all('SELECT ck_oid FROM invoices WHERE overdue_lost'))
 
         response = self.connection.get_completed_overdue_allocations(start_search_time, end_search_time)
 
@@ -402,9 +402,9 @@ class Overdues:
     # NOTE: UPDATEing singly for reconciliation of hold_remove_time
     # On new - by checkout - process
     def _process_fines(self):
-        fined_patrons = self.db.all('SELECT patron_oid, hold_length, invoice_oid, registrar_hold FROM invoices WHERE fee_status AND NOT waived')
+        fined_patrons = self.db.all('SELECT patron_oid, ck_oid, invoice_oid, registrar_hold FROM invoices WHERE fee_status AND NOT waived')
 
-        for patron_oid, hold_length, invoice_oid, registrar_hold in fined_patrons:
+        for patron_oid, ck_oid, invoice_oid, registrar_hold in fined_patrons:
             invoice = self.connection.get_invoice(invoice_oid, ['datePaid', 'isHold']).json()['payload']
             if invoice['datePaid']:
 
@@ -414,6 +414,10 @@ class Overdues:
                     print(f"Patron oid: {patron_oid} -- paid fine -- {patron['name']} - ({patron['barcode']}) -- Remove Registrar Hold")
 
                 date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
+
+                # can use even for declared lost items since repercussions won't change after 6 months, so it doesn't matter the calculated amount will use the lost-returned date
+                alloc = self.connection.get_allocation(ck_oid, properties=['realEndTime', 'scheduledEndTime', 'realReturnTime', 'rtype', 'checkoutCenter']).json()['payload']
+                conseq, _, _ = self.utils.get_overdue_consequence(alloc)
 
                 with self.db.get_cursor() as cursor:
                     ### NOTE: invoice must already be created for this, and thus count and hold_count are already up to date. Thus don't update
@@ -432,11 +436,11 @@ class Overdues:
                                         "WHEN count >= 12 " \
                                             "THEN NULL::TIMESTAMP " \
                                         "WHEN count >= 10 AND (hold_remove_time < 'NOW'::TIMESTAMP OR hold_remove_time IS NULL) " \
-                                            "THEN (%(paid_length)s + '180D'::INTERVAL)::TIMESTAMP " \
+                                            "THEN (%(paid_date)s + '180D'::INTERVAL)::TIMESTAMP " \
                                         "WHEN count >= 10 " \
                                             "THEN (hold_remove_time + '180D'::INTERVAL)::TIMESTAMP " \
                                         "WHEN count >= 5 AND (hold_remove_time < 'NOW'::TIMESTAMP OR hold_remove_time IS NULL) " \
-                                            "THEN (%(paid_length)s + '90D'::INTERVAL)::TIMESTAMP " \
+                                            "THEN (%(paid_date)s + '90D'::INTERVAL)::TIMESTAMP " \
                                         "WHEN count >= 5 " \
                                             "THEN (hold_remove_time + '90D'::INTERVAL)::TIMESTAMP " \
                                         "WHEN hold_remove_time < 'NOW'::TIMESTAMP OR hold_remove_time IS NULL" \
@@ -444,11 +448,12 @@ class Overdues:
                                         "ELSE hold_remove_time + %(base_extended)s END " \
                                     "WHERE patron_oid = %(p_oid)s " \
                                     "RETURNING hold_remove_time, count",
-                                                                    paid_length   = date_paid + timedelta(days=hold_length),
-                                                                    base_extended = f'{hold_length}D::INTERVAL')
+                                                                    paid_date     = date_paid,
+                                                                    paid_length   = date_paid + timedelta(days=conseq["Hold"]),
+                                                                    base_extended = f'{conseq["Hold"]}D::INTERVAL')
                     back_hold_remove_time, overdues_count = cursor.fetchone() # gives datetime.datetime object for extended hold_remove time of sequential invoices
                 
-                hold_len = hold_length
+                hold_len = conseq["Hold"]
                 if overdues_count >= 12:
                     hold_len = 0
                 elif overdues_count >= 10:
@@ -503,7 +508,7 @@ class Overdues:
     def _process_lost(self):
         lost_overdues = self.db.all("SELECT ck_oid FROM invoices WHERE overdues_start_date < 'NOW'::TIMESTAMP - '6Months'::INTERVAL AND NOT overdue_lost")
         
-        with open(f'Lost Logs/Lost Items {datetime.now().isoformat(timespec='seconds').replace(':','_')}.csv', 'w') as csv:
+        with open(f"Lost Logs/Lost Items {datetime.now().isoformat(timespec='seconds').replace(':','_')}.csv", 'w') as csv:
             csv.write('item oid, item name, item serial number, item barcode, item type path, item creation date, checkout oid, checkout id, patron oid, patron name, patron wiscard, due date\n')
             
             for allocation_oid in lost_overdues:
@@ -534,13 +539,77 @@ class Overdues:
                                         alloc['payload']['uniqueId'],
                                         alloc['payload']['patron']['name'],
                                         alloc['payload']['patron']['barcode']]) + '\n')
+
+                    ## Email
         
+        # maybe do resources instead of full checkouts?
         allocations = input("Lost Returned allocations (whitespace seperation): ")
         allocation_list = allocations.split()
-        insert_query = ""
+
         for allocation in allocation_list:
             alloc_oid = self.connection.get_checkout(id=allocation if not allocation.isdigit() else 'CK-' + allocation).json()['payload']['result'][0]['oid']
-        
+            invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid = %(ck_oid)s', ck_oid = alloc_oid)
+            resources = self.connection.get_allocation(alloc_oid, properties=['items']).json()['payload']['items']
+            for resource in resources:
+                self.connection.undelete_resource(resource['resource']['oid'])
+
+            date_back = datetime.now()
+
+            ### NOTE: Very similar to _process_fines
+            # can use even for declared lost items since repercussions won't change after 6 months, so it doesn't matter the calculated amount will use the lost-returned date
+            alloc = self.connection.get_allocation(alloc_oid, properties=['realEndTime', 'scheduledEndTime', 'realReturnTime', 'rtype', 'checkoutCenter']).json()['payload']
+            conseq, _, _ = self.utils.get_overdue_consequence(alloc)
+
+            with self.db.get_cursor() as cursor:
+                ### NOTE: invoice must already be created for this, and thus count and hold_count are already up to date. Thus don't update
+                cursor.run("UPDATE overdues SET " \
+                                "fee_count = fee_count - 1, " \
+                                "hold_length = CASE " \
+                                    "WHEN count >= 12 " \
+                                        "THEN '0'::INTERVAL " \
+                                    "WHEN count >= 10 " \
+                                        "THEN hold_length + '180D'::INTERVAL " \
+                                    "WHEN count >= 5 " \
+                                        "THEN hold_length + '90D'::INTERVAL " \
+                                    "ELSE hold_length + %(base_extended)s"
+                                "END " \
+                                "hold_remove_time = CASE " \
+                                    "WHEN count >= 12 " \
+                                        "THEN NULL::TIMESTAMP " \
+                                    "WHEN count >= 10 AND (hold_remove_time < 'NOW'::TIMESTAMP OR hold_remove_time IS NULL) " \
+                                        "THEN (%(return_date)s + '180D'::INTERVAL)::TIMESTAMP " \
+                                    "WHEN count >= 10 " \
+                                        "THEN (hold_remove_time + '180D'::INTERVAL)::TIMESTAMP " \
+                                    "WHEN count >= 5 AND (hold_remove_time < 'NOW'::TIMESTAMP OR hold_remove_time IS NULL) " \
+                                        "THEN (%(return_date)s + '90D'::INTERVAL)::TIMESTAMP " \
+                                    "WHEN count >= 5 " \
+                                        "THEN (hold_remove_time + '90D'::INTERVAL)::TIMESTAMP " \
+                                    "WHEN hold_remove_time < 'NOW'::TIMESTAMP OR hold_remove_time IS NULL" \
+                                        "THEN %(return_length)s::TIMESTAMP " \
+                                    "ELSE hold_remove_time + %(base_extended)s END " \
+                                "WHERE patron_oid = %(p_oid)s " \
+                                "RETURNING hold_remove_time, count",
+                                                                return_date   = date_back,
+                                                                return_length   = date_back + timedelta(days=conseq["Hold"]),
+                                                                base_extended = f'{conseq["Hold"]}D::INTERVAL')
+                back_hold_remove_time, overdues_count = cursor.fetchone() # gives datetime.datetime object for extended hold_remove time of sequential invoices
+            
+            hold_len = conseq["Hold"]
+            if overdues_count >= 12:
+                hold_len = 0
+            elif overdues_count >= 10:
+                hold_len = 180
+            elif overdues_count >= 5:
+                hold_len = 90
+
+            self.db.run("UPDATE invoices SET " \
+                            "fee_status = false, " \
+                            "registrar_hold = false, " \
+                            "hold_length = %(hold_l)s" \
+                            "hold_remove_time = %(hold_rtime)s " \
+                        "WHERE invoice_oid = %(i_oid)s", hold_l = hold_len, hold_rtime = back_hold_remove_time, i_oid = invoice_oid)
+            
+            # Email
     
     def excluded_allocations(self, allocations: str):
         allocation_list = allocations.split()
