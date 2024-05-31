@@ -506,7 +506,7 @@ class Overdues:
                         "WHERE invoice_oid IN %(i_ids)s", i_ids = tuple(invoice_oids))
     
     def _process_lost(self):
-        lost_overdues = self.db.all("SELECT ck_oid FROM invoices WHERE overdues_start_date < 'NOW'::TIMESTAMP - '6Months'::INTERVAL AND NOT overdue_lost")
+        lost_overdues = self.db.all("SELECT ck_oid FROM invoices WHERE overdues_start_time < 'NOW'::TIMESTAMP - '6Months'::INTERVAL AND NOT overdue_lost")
         
         with open(f"Lost Logs/Lost Items {datetime.now().isoformat(timespec='seconds').replace(':','_')}.csv", 'w') as csv:
             csv.write('item oid, item name, item serial number, item barcode, item type path, item creation date, checkout oid, checkout id, patron oid, patron name, patron wiscard, due date\n')
@@ -539,6 +539,8 @@ class Overdues:
                                         alloc['payload']['uniqueId'],
                                         alloc['payload']['patron']['name'],
                                         alloc['payload']['patron']['barcode']]) + '\n')
+
+                self.db.run("UPDATE invoices SET overdue_lost = True WHERE ck_oid = %(ck_oid)s", ck_oid = allocation_oid)
 
                     ## Email
         
