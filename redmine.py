@@ -250,6 +250,17 @@ class RedmineConnection:
             print(", ".join(phone_numbers))
             print(f"Total: {len(phone_numbers)}")
     
+    def get_contact(self, name = '', email = ''):
+        if name:
+            search = name
+        elif email:
+            search = email
+        else:
+            return "name/email must be specified"
+        return self.session.get(url = self.host + f'/contacts.json?project_id={self.project_id}&search={search}')
+
+    def email_patron(self):
+        pass
 
 class Texting(RedmineConnection):
 
