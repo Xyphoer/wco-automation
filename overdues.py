@@ -218,13 +218,16 @@ class Overdues:
         self.db.run(f"INSERT INTO history (time_ran) VALUES ('{end_search_time.isoformat()}')") # should isolate to own function running at end
         current_hold_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE hold_status AND NOT (waived OR overdue_lost)')  # should tidy up and not do one big query, but single ones when needed
         current_fine_allocs = self.db.all('SELECT ck_oid, invoice_oid FROM invoices WHERE fee_status AND NOT (waived OR overdue_lost)')
+        # any checkout specified by staff via 'excluded_allocations' or a checkout that has been returned solely for the purpose of declaring lost, should not be processed as a returned overdue checkout.
         excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations').append(self.db.all('SELECT ck_oid FROM invoices WHERE overdue_lost'))
 
         response = self.connection.get_completed_overdue_allocations(start_search_time, end_search_time)
 
         for allocation in response.json()['payload']['result']:
             if allocation['oid'] not in excluded_checkouts:
+                # retrieve policy consequences based on allocation items, types, and overdue length (planned incorporation of count here instead of in sql upserts)
                 conseq, end_time, checkout_center = self.utils.get_overdue_consequence(allocation)
+                # used to decriment fee_count and/or registrar_count in database if one is removed
                 fee_status, registrar_status = 0, 0
 
                 # If they have a fine, remove it as they returned the item
@@ -258,36 +261,41 @@ class Overdues:
                 for item in allocation['items']:
                     item_returned = datetime.strptime(item['realReturnTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
                     allocation_due = datetime.strptime(item['returnTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+                    # 10 minute grace period before determining if item is truly overdue (24 grace period for overall overdues for non-reserves still applies)
                     if item_returned > allocation_due + timedelta(minutes=10):
                         item_count += 1
 
-                try:
-                    insert_dict[allocation['oid']][0] += item_count
-                    insert_dict[allocation['oid']][1:] = ['True' if conseq['Hold'] else 'False',  # hold_status
-                                                                    'False',                                # fee_status ALWAYS false for returned items
-                                                                    conseq['Hold'],                         # hold_length
-                                                                    f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time (from ck end time)
-                                                                    checkout_center,    # checkout center for hold
-                                                                    allocation,
-                                                                    fee_status,
-                                                                    registrar_status]
+                ## processing checkouts singularly, no checkout should repeat.
+                # try:
+                #     insert_dict[allocation['oid']][0] += item_count
+                #     insert_dict[allocation['oid']][1:] = ['True' if conseq['Hold'] else 'False',  # hold_status
+                #                                                     'False',                                # fee_status ALWAYS false for returned items
+                #                                                     conseq['Hold'],                         # hold_length
+                #                                                     f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time (from ck end time)
+                #                                                     checkout_center,    # checkout center for hold
+                #                                                     allocation,
+                #                                                     fee_status,
+                #                                                     registrar_status]
 
-                except KeyError as e:
-                    insert_dict[allocation['oid']] = [item_count,
-                                                                'True' if conseq['Hold'] else 'False',  # hold_status
-                                                                'False',                                # fee_status ALWAYS false for returned items
-                                                                conseq['Hold'],                         # hold_length
-                                                                f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time (from ck end time)
-                                                                checkout_center,    # checkout center for hold
-                                                                allocation,
-                                                                fee_status,
-                                                                registrar_status]
+                # except KeyError as e:
+                ##
+                insert_dict[allocation['oid']] = [item_count,
+                                                  'True' if conseq['Hold'] else 'False',  # hold_status
+                                                  'False',                                # fee_status ALWAYS false for returned items
+                                                  conseq['Hold'],                         # hold_length
+                                                  f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time (from ck end time)
+                                                  checkout_center,    # checkout center for hold
+                                                  allocation,         # allocation to attach the hold to, as well as for extra invoice information
+                                                  fee_status,         # amount to decriment from database fee_count
+                                                  registrar_status]   # amount to decriment from database registrar_hold_count
 
         for key, value in insert_dict.items():
             try:
                 invoice_oid = False
 
                 ## Count potentially be moved into loop for allocs
+                # get invoice information and email the patron with information now that they've returned
+                # place hold if one is not already in place
                 if key not in current_hold_allocs:
                     if value[1] == 'True':
                         invoice = self.place_hold(key, checkout_center=value[5], allocation=value[6], update_db=False)
