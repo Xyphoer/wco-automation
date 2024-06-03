@@ -10,13 +10,15 @@ class RedmineConnection:
         self.host = host
         self.redmine_auth_key = redmine_auth_key
 
-        self.project_id = 171 # hardcoded Tech Circ (change)
-        #self.status_new = 19 # hardcoded new status (change)
-        #self.tracker_support = 3 # hardcoded support tracker (change)
-        self.custom_field = {'id': 137, 'name': 'Computer Lab'}
-
         self.session = requests.Session()
         self.session.headers = {'X-Redmine-API-Key': self.redmine_auth_key}
+
+        self.project = self.get_project(name = 'technology-circulation').json()
+        self.project_id = self.project['project']['id']
+        self.statuses = {'New': self.get_status_id(name = 'New'),
+                         'Resolved': self.get_status_id(name = 'Resolved')}
+        #self.tracker_support = 3 # hardcoded support tracker (change)
+        self.custom_field = {'id': 137, 'name': 'Computer Lab'}
 
         # self.session.cookies.set('_redmine_session', redmine_session_cookie)
         # self.session.cookies.set(shib_session_cookie_name, shib_session_cookie_value)
@@ -250,6 +252,18 @@ class RedmineConnection:
             print(", ".join(phone_numbers))
             print(f"Total: {len(phone_numbers)}")
     
+    def get_project(self, name: str):
+        return self.session.get(self.host + f'/projects/{name}.json')
+
+    def get_statuses(self):
+        return self.session.get(self.host + '/issue_statuses.json')
+    
+    def get_status_id(self, name: str):
+        statuses = self.get_statuses().json()['issue_statuses']
+        for status in statuses:
+            if status['name'] == name:
+                return status['id']
+    
     def get_contact(self, name = '', email = ''):
         if name:
             search = name
@@ -259,8 +273,39 @@ class RedmineConnection:
             return "name/email must be specified"
         return self.session.get(url = self.host + f'/contacts.json?project_id={self.project_id}&search={search}')
 
-    def email_patron(self):
-        pass
+    def create_contact(self, first_name: str, last_name: str, email: str, middle_name: str = ''):
+        return self.session.post(url = self.host + '/contacts.json',
+                                 json = {"contact": {
+                                            "project_id": self.project_id,
+                                            "first_name": first_name,
+                                            "last_name": last_name,
+                                            "email": email,
+                                            "visibility": "0" # visible to project only
+                                 }})
+
+    # no email sent to contact
+    def create_ticket(self, subject: str, contact_email: str, contact_first_name: str = '', contact_last_name: str = '', description: str = '', status_id: int = None, project_id: int = None):
+        return self.session.post(url = self.host + '/helpdesk_tickets.json',
+                                 json = {"helpdesk_ticket": {
+                                            "issue": {
+                                                "project_id": project_id if project_id else self.project_id,
+                                                "status_id": status_id if status_id else self.status['resolved'],
+                                                "description": description,
+                                                "subject": subject
+                                                },
+                                            "contact": {
+                                                "first_name": contact_first_name,
+                                                "last_name": contact_last_name,
+                                                "email": contact_email
+                                         }}})
+
+    def email_patron(self, issue_id: int, status_id: int, content: str):
+        return self.session.post(url = self.host + '/helpdesk/email_note.json',
+                                 json = {"message": {
+                                            "issue_id": issue_id,
+                                            "status_id": status_id,
+                                            "content": content
+                                 }})
 
 class Texting(RedmineConnection):
 
@@ -357,3 +402,19 @@ class Texting(RedmineConnection):
 
             print(", ".join(phone_numbers))
             print(f"Total: {len(phone_numbers)}")
+
+
+class CannedMessages:
+    def __init__(self, patron_name: str, ck_id: str, invoice_id: str, checkout_center: str, due_date: str, count: int, item_tuple):
+        self._base_item_list = '\n'.join([f'- {item_name} - {classification}\n' for item_name, classification, charge in item_tuple])
+        self.base = {'subject': f"{patron_name} - Overdue - {ck_id} - {invoice_id}",
+                     'description':
+                        f"Hello {patron_name}\n\n" \
+                        f"Your Checkout {ck_id} from {checkout_center} InfoLab was due back {due_date}.\n" \
+                        "As such, a hold has been placed on your WebCheckout account in regards to the overdue policy (https://kb.wisc.edu/library/131963) for the following items:\n\n" \
+                        f"{self._base_item_list}\n" \
+                        f"Please note that your current overdue item count is: {count}\n\n" \
+                        f"Please return or contact us as soon as possible. For any questions or concerns please feel free to reply or reach out to us at technologycirculation@library.wisc.edu or in person at the {checkout_center} InfoLab.\n\n" \
+                        "Best,"}
+
+        self._charge_item_list = '\n'.join([f'- {item_name} - {classification} - ${charge}\n' for item_name, classification, charge in item_tuple])
