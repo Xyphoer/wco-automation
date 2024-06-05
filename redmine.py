@@ -404,9 +404,19 @@ class Texting(RedmineConnection):
             print(f"Total: {len(phone_numbers)}")
 
 
+# possibly explore better methods
 class CannedMessages:
-    def __init__(self, patron_name: str, ck_id: str, invoice_id: str, checkout_center: str, due_date: str, count: int, item_tuple):
-        self._base_item_list = '\n'.join([f'- {item_name} - {classification}\n' for item_name, classification, charge in item_tuple])
+    def __init__(self, patron_name: str,
+                       ck_id: str,
+                       invoice_id: str,
+                       checkout_center: str,
+                       due_date: str,
+                       count: int,
+                       item_tuple: (str, str, float),
+                       return_date: str = None,
+                       hold_length: int = None,
+                       removal_date: str = None):
+        self._base_item_list = '\n'.join([f'- {item_name} - {classification}\n' for item_name, classification, _ in item_tuple])
         self.base = {'subject': f"{patron_name} - Overdue - {ck_id} - {invoice_id}",
                      'description':
                         f"Hello {patron_name}\n\n" \
@@ -414,7 +424,46 @@ class CannedMessages:
                         "As such, a hold has been placed on your WebCheckout account in regards to the overdue policy (https://kb.wisc.edu/library/131963) for the following items:\n\n" \
                         f"{self._base_item_list}\n" \
                         f"Please note that your current overdue item count is: {count}\n\n" \
-                        f"Please return or contact us as soon as possible. For any questions or concerns please feel free to reply or reach out to us at technologycirculation@library.wisc.edu or in person at the {checkout_center} InfoLab.\n\n" \
+                        "Please return or contact us as soon as possible. For any questions or concerns please feel free to reply " \
+                        f"or reach out to us at technologycirculation@library.wisc.edu or in person at the {checkout_center} InfoLab.\n\n" \
                         "Best,"}
 
         self._charge_item_list = '\n'.join([f'- {item_name} - {classification} - ${charge}\n' for item_name, classification, charge in item_tuple])
+        self.charge = {'subject': f"{patron_name} - Overdue Charge - {ck_id} - {invoice_id}",
+                       'description':
+                            f"Hello {patron_name}\n\n" \
+                            f"Your checkout {ck_id} from {checkout_center} InfoLab was due back {due_date}.\n" \
+                            "As such, a hold has been placed on your WebCheckout account in regards to the overdue policy (https://kb.wisc.edu/library/131963) for the following items:\n\n" \
+                            f"{self._charge_item_list}\n" \
+                            f"Total Charge: {sum([charge for _, _, charge in item_tuple])}\n" \
+                            f"Please note that your current overdue item count is: {count}\n\n" \
+                            f"To resolve this invoice, either return the overdue items to {checkout_center} InfoLab, " \
+                            "or pay the total amount at College Library InfoLab (2nd floor computer lab in College Library).\n\n" \
+                            "For any questions or concerns please feel free to reply " \
+                            f"or reach out to us at technologycirculation@library.wisc.edu or in person at the {checkout_center} InfoLab.\n\n" \
+                            "Best,"}
+        
+        self.returned = {'subject': f"{patron_name} - Overdue Return - {ck_id} - {invoice_id}",
+                         'description':
+                            f"Hello {patron_name}\n\n" \
+                            f"Your overdue checkout {ck_id} from {checkout_center} InfoLab has been returned on {return_date}.\n" \
+                            f"As such, any fee or register hold will be removed within a few business days. " \
+                            f"A WebCheckout hold on your account will remain in effect for {days} days after the return in accordance to the overdue policy " \
+                            "(https://kb.wisc.edu/library/131963) for the following items:\n\n" \
+                            f"{self._base_item_list}\n" \
+                            f"Final WebCheckout Hold Removal Date: {removal_date}\n" \
+                            f"Please note that your current overdue item count is: {count}\n\n" \
+                            "For any questions or concerns please feel free to reply " \
+                            f"or reach out to us at technologycirculation@library.wisc.edu or in person at the {checkout_center} InfoLab.\n\n" \
+                            "Best,"}
+        
+        self.lifted = {'subject': f"{patron_name} - Overdue Lifted - {ck_id} - {invoice_id}",
+                       'description':
+                            f"Hello {patron_name}\n\n" \
+                            f"The WebCheckout hold for overdue {ck_id} from {checkout_center} InfoLab has been lifted on {removal_date}.\n" \
+                            "As such, in accordance with our overdue policy (https://kb.wisc.edu/library/131963), you are now eligible to check out equipment " \
+                            "from any Infolab location.\n\n" \
+                            f"Please note that your current overdue item count is: {count}\n\n" \
+                            "For any questions or concerns please feel free to reply " \
+                            f"or reach out to us at technologycirculation@library.wisc.edu or in person at the {checkout_center} InfoLab.\n\n" \
+                            "Best,"}
