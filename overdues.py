@@ -1,13 +1,14 @@
 from connection import Connection
-from redmine import Texting
+from redmine import Texting, RedmineConnection, CannedMessages
 from postgres import Postgres
 from datetime import datetime, timedelta, timezone
 from utils import utils, Repercussions
 
 class Overdues:
 
-    def __init__(self, connection: Connection, utilities: utils, texting: Texting, db_pass):
+    def __init__(self, connection: Connection, utilities: utils, rm_connection: RedmineConnection, texting: Texting, db_pass):
         self.connection = connection
+        self.rm_connection = rm_connection
         self.texting = texting
         self.utils = utilities
         self.db = self._connect_to_db(db_pass)
@@ -56,6 +57,13 @@ class Overdues:
         invoice = self.connection.update_invoice(invoice_oid, {"dueDate": None}).json()
         _hold = self.connection.apply_invoice_hold(invoice['payload'], message)
         ck_oid = allocation['oid'] if allocation else None
+
+        #####################
+        # create canned message, ticket, and reply
+        # email_subject, email_desc = CannedMessages()
+        # self.rm_connection.create_ticket()
+        # self.rm_connection.email_patron()
+        #####################
 
         if not invoice_oid:
             print(f"Failed to create invoice for patron with oid {oid}")  # should be better
@@ -113,7 +121,14 @@ class Overdues:
         invoice = self.connection.get_invoice(invoice_oid, ['person']).json()['payload']
         self.connection.remove_invoice_hold(invoice)  # NOTE: Works, but WCO thows 500 error if hold already gone
         self.connection.waive_invoice(invoice)
-        self.connection.email_invoice(invoice)
+
+        #####################
+        # create canned message, ticket, and reply
+        # email_subject, email_desc = CannedMessages()
+        # self.rm_connection.create_ticket()
+        # self.rm_connection.email_patron()
+        #####################
+
         # print(f"{invoice['person']['name']} -- {invoice['person']['userid']} -- Hold Removed")
         return invoice
 
@@ -123,7 +138,13 @@ class Overdues:
         if type(invoice_oid) == int:
             invoice = self.connection.get_invoice(invoice_oid, properties=['patron']).json()['payload']
             self.connection.add_charge(invoice, amount=cost, subtype="Loss", text="")
-            self.connection.email_invoice(invoice)
+            
+            #####################
+            # create canned message, ticket, and reply
+            # email_subject, email_desc = CannedMessages()
+            # self.rm_connection.create_ticket()
+            # self.rm_connection.email_patron()
+            #####################
                 
             self.db.run("UPDATE invoices " \
                         "SET fee_status = True " \
@@ -199,7 +220,13 @@ class Overdues:
                             self.db.run("UPDATE invoices SET registrar_hold = True WHERE invoice_oid = %(i_id)s", i_id = invoice_oid)
                             self.db.run("UPDATE overdues SET registrar_hold = registrar_hold + 1 WHERE patron_oid = %(p_id)s", p_id = patron_oid)
                     if invoice:
-                        self.connection.email_invoice(invoice)
+                        pass
+                        #####################
+                        # create canned message, ticket, and reply
+                        # email_subject, email_desc = CannedMessages()
+                        # self.rm_connection.create_ticket()
+                        # self.rm_connection.email_patron()
+                        #####################
         
         try:
             self.texting.ticketify()
@@ -300,11 +327,25 @@ class Overdues:
                     if value[1] == 'True':
                         invoice = self.place_hold(key, checkout_center=value[5], allocation=value[6], update_db=False)
                         invoice_oid = invoice['oid']
-                        self.connection.email_invoice(invoice)
+
+                        #####################
+                        # create canned message, ticket, and reply
+                        # email_subject, email_desc = CannedMessages()
+                        # self.rm_connection.create_ticket()
+                        # self.rm_connection.email_patron()
+                        #####################
+
                 else:
                     invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid = %(a_id)s', a_id = value[6]['oid'])
                     invoice = self.connection.get_invoice(invoice_oid).json()['payload']
-                    self.connection.email_invoice(invoice)
+
+                    #####################
+                    # create canned message, ticket, and reply
+                    # email_subject, email_desc = CannedMessages()
+                    # self.rm_connection.create_ticket()
+                    # self.rm_connection.email_patron()
+                    #####################
+
                 #### insert_query and below postgres need conversion to new db layout
 
                 # Insert individually as processing:
@@ -427,6 +468,13 @@ class Overdues:
                 alloc = self.connection.get_allocation(ck_oid, properties=['realEndTime', 'scheduledEndTime', 'realReturnTime', 'rtype', 'checkoutCenter']).json()['payload']
                 conseq, _, _ = self.utils.get_overdue_consequence(alloc)
 
+                #####################
+                # create canned message, ticket, and reply -- use returned canned message
+                # email_subject, email_desc = CannedMessages()
+                # self.rm_connection.create_ticket()
+                # self.rm_connection.email_patron()
+                #####################
+
                 with self.db.get_cursor() as cursor:
                     ### NOTE: invoice must already be created for this, and thus count and hold_count are already up to date. Thus don't update
                     cursor.run("UPDATE overdues SET " \
@@ -489,6 +537,12 @@ class Overdues:
             if hold_remove_time and hold_remove_time < now:
                 self.remove_hold(invoice_oid)
                 invoice_oids.append(invoice_oid)
+                #####################
+                # create canned message, ticket, and reply
+                # email_subject, email_desc = CannedMessages()
+                # self.rm_connection.create_ticket()
+                # self.rm_connection.email_patron()
+                #####################
                 if patron_oid in holds_removed:
                     holds_removed[patron_oid]['amount'] += 1
                     holds_removed[patron_oid]['length'] += hold_length
@@ -551,6 +605,12 @@ class Overdues:
                 self.db.run("UPDATE invoices SET overdue_lost = True WHERE ck_oid = %(ck_oid)s", ck_oid = allocation_oid)
 
                     ## Email
+                    #####################
+                    # create canned message, ticket, and reply
+                    # email_subject, email_desc = CannedMessages()
+                    # self.rm_connection.create_ticket()
+                    # self.rm_connection.email_patron()
+                    #####################
         
         # maybe do resources instead of full checkouts?
         allocations = input("Lost Returned allocations (whitespace seperation): ")
@@ -620,6 +680,12 @@ class Overdues:
                         "WHERE invoice_oid = %(i_oid)s", hold_l = hold_len, hold_rtime = back_hold_remove_time, i_oid = invoice_oid)
             
             # Email
+            #####################
+            # create canned message, ticket, and reply
+            # email_subject, email_desc = CannedMessages()
+            # self.rm_connection.create_ticket()
+            # self.rm_connection.email_patron()
+            #####################
     
     def excluded_allocations(self, allocations: str):
         allocation_list = allocations.split()
@@ -664,7 +730,7 @@ class Overdues:
                         proc_date = datetime.now(), a_id = un_processed_allocs)
 
     def _process_expirations(self):
-        # process expired invoices
+        # process expired invoices | should emails be sent?
         with self.db.get_cursor() as cursor:
             cursor.run("DELETE FROM invoices WHERE exiration < 'NOW'::TIMESTAMP RETURNING count, patron_oid")
             back = cursor.fetchone()

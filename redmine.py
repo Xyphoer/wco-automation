@@ -446,7 +446,7 @@ class CannedMessages:
         self.returned = {'subject': f"{patron_name} - Overdue Return - {ck_id} - {invoice_id}",
                          'description':
                             f"Hello {patron_name}\n\n" \
-                            f"Your overdue checkout {ck_id} from {checkout_center} InfoLab has been returned on {return_date}.\n" \
+                            f"Your overdue checkout {ck_id} from {checkout_center} InfoLab has been resolved on {return_date}.\n" \
                             f"As such, any fee or register hold will be removed within a few business days. " \
                             f"A WebCheckout hold on your account will remain in effect for {days} days after the return in accordance to the overdue policy " \
                             "(https://kb.wisc.edu/library/131963) for the following items:\n\n" \
