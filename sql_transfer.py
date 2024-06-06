@@ -19,6 +19,7 @@ wco = Connection(wco_userid, wco_password, wco_host)
 db.run("ALTER TABLE overdues RENAME TO overdues_old")
 db.run("ALTER TABLE excluded_allocations DROP COLUMN timeout")
 db.run("ALTER TABLE excluded_allocations ADD COLUMN processed TIMESTAMP")
+db.run("UPDATE excluded_allocations SET processed = 'Now'::TIMESTAMP")
 
 db.run("CREATE EXTENSION IF NOT EXISTS intarray") # required for subracting array of ints from array of ints
 db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_count INTEGER DEFAULT 0, fee_count INTEGER DEFAULT 0, hold_length INTERVAL DEFAULT CAST('0' AS INTERVAL), hold_remove_time TIMESTAMP, invoice_oids INTEGER[], registrar_hold_count INTEGER DEFAULT 0)")
