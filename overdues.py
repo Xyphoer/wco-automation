@@ -12,6 +12,25 @@ class Overdues:
         self.texting = texting
         self.utils = utilities
         self.db = self._connect_to_db(db_pass)
+
+        self.register_changes_email=''
+        self.register_changes_name_first=''
+        self.register_changes_name_last=''
+        with open('config.txt', 'r') as config:
+            for line in config:
+                if "register_changes_email" in line.lower():
+                    self.register_changes_email = line.split("=", maxsplit=1)[1].strip()
+                if "register_changes_name_first" in line.lower():
+                    self.register_changes_name_first = line.split("=", maxsplit=1)[1].strip()
+                if "register_changes_name_last" in line.lower():
+                    self.register_changes_name_last = line.split("=", maxsplit=1)[1].strip()
+        if not (self.register_changes_email and self.register_changes_name_first and self.register_changes_name_last):
+            print('Incomplete data on registrar changes contact info. Please provide data.')
+            self.register_changes_email = input("Contact email: ")
+            self.register_changes_name_first = input("Contact First Name: ")
+            self.register_changes_name_last = input("Contact Last Name")
+
+        self.session_registrar_changes = []
     
     def update(self, start_time: str, end_time: str = '') -> dict:
         self._process_returned_overdues(start_time, end_time)
@@ -20,6 +39,7 @@ class Overdues:
         self._process_current_overdues()
         self._process_expirations()
         self._process_lost()
+        self._process_registrar_holds()
  
     def _connect_to_db(self, db_pass) -> Postgres:
         db = Postgres(f"dbname=postgres user=postgres password={db_pass}")
@@ -58,7 +78,8 @@ class Overdues:
         _hold = self.connection.apply_invoice_hold(invoice['payload'], message)
         ck_oid = allocation['oid'] if allocation else None
 
-        canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db).get_base()
+        canned = CannedMessages(invoice_oid, self.connection, self.db).get_base()
+        canned_subject, canned_description = canned['subject'], canned['description']
         person = self.connection.get_patron(oid, ['email', 'firstName', 'lastName']).json()['payload']
         ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
         self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
@@ -121,7 +142,8 @@ class Overdues:
         self.connection.waive_invoice(invoice)
 
         patron_oid = self.db.one('SELECT patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
-        canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db).get_lifted() ## possible issues here if multiple holds
+        canned = CannedMessages(invoice_oid, self.connection, self.db).get_lifted() ## possible issues here if multiple holds
+        canned_subject, canned_description = canned['subject'], canned['description']
         person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName']).json()['payload']
         ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
         self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
@@ -137,7 +159,8 @@ class Overdues:
             self.connection.add_charge(invoice, amount=cost, subtype="Loss", text="")
             
             patron_oid = self.db.one('SELECT patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
-            canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db).get_charge()
+            canned = CannedMessages(invoice_oid, self.connection, self.db).get_charge()
+            canned_subject, canned_description = canned['subject'], canned['description']
             person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName']).json()['payload']
             ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
             self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
@@ -188,7 +211,8 @@ class Overdues:
                         invoice = self.place_hold(patron_oid, center, allocation, overdue_time=scheduled_end)
                         invoice_oid = invoice['oid']
 
-                        canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db).get_base()
+                        canned = CannedMessages(invoice_oid, self.connection, self.db).get_base()
+                        canned_subject, canned_description = canned['subject'], canned['description']
                         person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName']).json()['payload']
                         ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
                         self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
@@ -205,7 +229,8 @@ class Overdues:
                             charge = allocation['aggregateValueOut'] if allocation['aggregateValueOut'] else 2000 # value of checked out items only
                             fee_placed = self.place_fee(invoice_oid, charge)
 
-                            canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db).get_charge()
+                            canned = CannedMessages(invoice_oid, self.connection, self.db).get_charge()
+                            canned_subject, canned_description = canned['subject'], canned['description']
                             person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName']).json()['payload']
                             ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
                             self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
@@ -220,8 +245,15 @@ class Overdues:
                         if consequences['Registrar Hold'] and allocation['oid'] not in current_registrar_holds:
                             # if this is their first registrar hold
                             if self.db.run("SELECT registrar_hold_count FROM overdues WHERE patron_oid = %(p_id)s", p_id = patron_oid) == 0:
-                                person = self.connection.get_patron(patron_oid, ['barcode']).json()['payload']
-                                print(f'Registrar Hold needed for: {person["oid"]} -- {person["name"]} - ({person["barcode"]})')
+                                canned = CannedMessages(invoice_oid, self.connection, self.db).canned_registrar_placed
+                                canned_subject, canned_description = canned['subject'], canned['description']
+                                person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName', 'name', 'barcode']).json()['payload']
+                                ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+                                self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
+
+                                self.session_registrar_changes.append((1, person['name'], person['barcode'], ticket.json()['helpdesk_ticket']['id']))
+
+                                print(f'Registrar Hold placed for: {person["oid"]} -- {person["name"]} - ({person["barcode"]})')
                                 
                             self.db.run("UPDATE invoices SET registrar_hold = True WHERE invoice_oid = %(i_id)s", i_id = invoice_oid)
                             self.db.run("UPDATE overdues SET registrar_hold = registrar_hold + 1 WHERE patron_oid = %(p_id)s", p_id = patron_oid)
@@ -275,8 +307,15 @@ class Overdues:
                             registrar_status = 1 # used to decriment overall count
                             # check if only registrar hold on patrons account
                             if self.db.run("SELECT registrar_hold_count FROM overdues WHERE patron_oid = %(p_id)s", p_id = allocation['patron']['oid']) == 1:
-                                person = self.connection.get_patron(allocation['patron']['oid'], ['barcode']).json()['payload']
-                                print(f"Items returned, registrar hold can be removed for oid: {person['oid']} -- {person['name']} - ({person['barcode']})")
+                                canned = CannedMessages(invoice_oid, self.connection, self.db).canned_registrar_removed
+                                canned_subject, canned_description = canned['subject'], canned['description']
+                                person = self.connection.get_patron(allocation['patron']['oid'], ['email', 'firstName', 'lastName', 'barcode']).json()['payload']
+                                ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+                                self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
+
+                                self.session_registrar_changes.append((0, person['name'], person['barcode'], ticket.json()['helpdesk_ticket']['id']))
+
+                                print(f"Items returned, registrar hold removed for oid: {person['oid']} -- {person['name']} - ({person['barcode']})")
 
                             # included updating of db in overall updates
                             ##self.db.run("UPDATE invoices SET registrar_hold = False WHERE invoice_oid = %(i_id)s", i_id = entry[1])
@@ -328,7 +367,8 @@ class Overdues:
                         invoice_oid = invoice['oid']
 
                         patron_oid = self.db.one('SELECT patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
-                        canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db).get_base()
+                        canned = CannedMessages(invoice_oid, self.connection, self.db).get_base()
+                        canned_subject, canned_description = canned['subject'], canned['description']
                         person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName']).json()['payload']
                         ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
                         self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
@@ -338,7 +378,8 @@ class Overdues:
                     invoice = self.connection.get_invoice(invoice_oid).json()['payload']
 
                     patron_oid = self.db.one('SELECT patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
-                    canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db).get_charge()
+                    canned = CannedMessages(invoice_oid, self.connection, self.db).get_charge()
+                    canned_subject, canned_description = canned['subject'], canned['description']
                     person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName']).json()['payload']
                     ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
                     self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
@@ -455,10 +496,18 @@ class Overdues:
             invoice = self.connection.get_invoice(invoice_oid, ['datePaid', 'isHold']).json()['payload']
             if invoice['datePaid']:
 
-                patron = self.connection.get_patron(patron_oid, ['name', 'barcode']).json()['payload']
-                print(f"Patron oid: {patron_oid} -- paid fine -- {patron['name']} - ({patron['barcode']}) -- Return & Delete item") # can do automatically
-                if registrar_hold:
-                    print(f"Patron oid: {patron_oid} -- paid fine -- {patron['name']} - ({patron['barcode']}) -- Remove Registrar Hold")
+                person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName', 'name', 'barcode']).json()['payload']
+                print(f"Patron oid: {patron_oid} -- paid fine -- {person['name']} - ({person['barcode']}) -- Return & Delete item") # can do automatically
+                if self.db.run("SELECT registrar_hold_count FROM overdues WHERE patron_oid = %(p_id)s", p_id = patron_oid) == 1:
+                    canned = CannedMessages(invoice_oid, self.connection, self.db).canned_registrar_removed
+                    canned_subject, canned_description = canned['subject'], canned['description']
+                    
+                    ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+                    self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
+
+                    self.session_registrar_changes.append((0, person['name'], person['barcode'], ticket.json()['helpdesk_ticket']['id']))
+
+                    print(f"Patron oid: {patron_oid} -- paid fine -- {person['name']} - ({person['barcode']}) -- Removed Registrar Hold")
 
                 date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
 
@@ -466,7 +515,8 @@ class Overdues:
                 alloc = self.connection.get_allocation(ck_oid, properties=['realEndTime', 'scheduledEndTime', 'realReturnTime', 'rtype', 'checkoutCenter']).json()['payload']
                 conseq, _, _ = self.utils.get_overdue_consequence(alloc)
 
-                canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db).get_returned()
+                canned = CannedMessages(invoice_oid, self.connection, self.db).get_returned()
+                canned_subject, canned_description = canned['subject'], canned['description']
                 person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName']).json()['payload']
                 ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
                 self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
@@ -670,11 +720,22 @@ class Overdues:
                             "hold_remove_time = %(hold_rtime)s " \
                         "WHERE invoice_oid = %(i_oid)s", hold_l = hold_len, hold_rtime = back_hold_remove_time, i_oid = invoice_oid)
             
-            patron = self.connection.get_patron(patron_oid ['name', 'barcode']).json()['payload']
-            print(f"Patron oid: {patron_oid} -- returned lost item -- {patron['name']} - ({patron['barcode']}) -- Remove Registrar Hold")
+
+            if self.db.run("SELECT registrar_hold_count FROM overdues WHERE patron_oid = %(p_id)s", p_id = patron_oid) == 1:
+                canned = CannedMessages(invoice_oid, self.connection, self.db).canned_registrar_removed
+                canned_subject, canned_description = canned['subject'], canned['description']
+                person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName', 'name', 'barcode']).json()['payload']
+
+                print(f"Patron oid: {patron_oid} -- returned lost item -- {person['name']} - ({person['barcode']}) -- Removed Registrar Hold")
+
+                ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+                self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
+
+                self.session_registrar_changes.append((0, person['name'], person['barcode'], ticket.json()['helpdesk_ticket']['id']))
 
             # Email
-            canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db, settled=date_back.isoformat(sep=' ', timespec='seconds')).get_returned()
+            canned = CannedMessages(invoice_oid, self.connection, self.db).get_returned()
+            canned_subject, canned_description = canned['subject'], canned['description']
             person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName']).json()['payload']
             ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
             self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
@@ -703,8 +764,15 @@ class Overdues:
             if registrar_status:
                 # if this is their only registrar hold
                 if self.db.run("SELECT registrar_hold_count FROM overdues WHERE patron_oid = %(p_id)s", p_id = p_oid) == 1:
-                    person = self.connection.get_patron(p_oid, ['barcode']).json()['payload']
-                    print(f'Excluded Registrar Hold Patron - Remove: {p_oid} -- {person["name"]} - ({person["barcode"]})')
+                    canned = CannedMessages(i_oid, self.connection, self.db).canned_registrar_removed
+                    canned_subject, canned_description = canned['subject'], canned['description']
+                    person = self.connection.get_patron(p_oid, ['email', 'firstName', 'lastName', 'name', 'barcode']).json()['payload']
+                    ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+                    self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
+
+                    self.session_registrar_changes.append((0, person['name'], person['barcode'], ticket.json()['helpdesk_ticket']['id']))
+
+                    print(f'Excluded Registrar Hold Patron - Removed: {p_oid} -- {person["name"]} - ({person["barcode"]})')
 
             with self.db.get_cursor() as cursor:
                 cursor.run("DELETE FROM invoices WHERE ck_oid = %(ck_oid)s RETURNING hold_status, fee_status", ck_oid = ck_oid)
@@ -737,6 +805,30 @@ class Overdues:
         with self.db.get_cursor() as cursor:
             cursor.run("DELETE FROM excluded_allocations WHERE processed + '1Y'::INTERVAL < 'NOW'::TIMESTAMP RETURNING allocation_oid")
             back = cursor.fetchone() # to be used for logging
+    
+    def _process_registrar_holds(self):
+        message_content_add = ""
+        message_content_remove = ""
+        description = ""
+
+        for register_change in self.session_registrar_changes:
+            if register_change[0] == 1:
+                message_content_add += f"- {register_change[1]} - ({register_change[2]}) - ticket: {register_change[3]}\n"
+            else:
+                message_content_remove += f"- {register_change[1]} - ({register_change[2]}) - ticket: {register_change[3]}\n"
+        
+        if message_content_add:
+            description += f"Registrar Holds Needed For:\n\n{message_content_add}\n\n"
+        if message_content_remove:
+            description += f"Removal of Registrar Holds Needed For:\n\n{message_content_remove}\n\n"
+        
+        if description:
+            ticket = self.rm_connection.create_ticket(f"Registrar Hold Changes - {datetime.now().isoformat(sep=' ', timespec='seconds')}",
+                                                    self.register_changes_email, self.register_changes_name_first, self.register_changes_name_last,
+                                                    description,
+                                                    self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+            self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
+            print(f"Email for registrar changes: {ticket.json()['helpdesk_ticket']['id']}")
 
     # balance invoice and overdues databases
     # reconciling hold_length, hold_remove_time, hold_status, fee_status, and registrar_hold

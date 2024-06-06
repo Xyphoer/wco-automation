@@ -414,6 +414,20 @@ class CannedMessages:
         self.wco_conn = wco_connection
         self.settled = settled
 
+        self.canned_registrar_placed = {'subject': 'Registrar Hold Placed',
+                                         'description': 'Hello,\n\n' \
+                                                        'Due to the length of your overdue, a registrar hold has been placed on your account.\n' \
+                                                        'For more details on our overdue policy please see our KB documentation (https://kb.wisc.edu/infolabs/131963).\n' \
+                                                        'Once the overdue equipment has been returned, within a few business days the hold will be removed.\n\n' \
+                                                        'Please let us know if you have any further questions or concerns.\n\n' \
+                                                        'Best,'}
+        self.canned_registrar_removed = {'subject': 'Registrar Hold Removed',
+                                         'description': 'Hello,\n\n' \
+                                                        'Due to the return of your overdue equipment, the registrar hold will be removed within the next few business days.\n' \
+                                                        'For more details on why this hold was placed, please see our overdue policy documentation (https://kb.wisc.edu/infolabs/131963).\n\n' \
+                                                        'Please let us know if you have any further questions or concerns.\n\n' \
+                                                        'Best,'}
+
     def _get_checkout_info(self, invoice_oid: int):
         ck_oid, patron_oid = self.db.one('SELECT ck_oid, patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
         allocation = self.wco_conn.get_allocation(ck_oid, ['items', 'patron', 'scheduledEndTime', 'checkoutCenter', 'realEndTime'])
@@ -498,7 +512,7 @@ class CannedMessages:
         patron_name, checkout_center, ck_id, _, count, _, _, invoice_id, _, _ = self._get_checkout_info(self.invoice_oid)
         removal_date = self.db.one("SELECT hold_remove_time FROM invoices WHERE invoice_oid = %(i_oid)s", i_oid=self.invoice_oid)
 
-        self.lifted = {'subject': f"{patron_name} - Overdue Lifted - {ck_id} - {invoice_id}",
+        return {'subject': f"{patron_name} - Overdue Lifted - {ck_id} - {invoice_id}",
                        'description':
                             f"Hello {patron_name}\n\n" \
                             f"The WebCheckout hold for overdue {ck_id} from {checkout_center} InfoLab has been lifted on {removal_date.isoformat(sep=' ', timespec='seconds')}.\n" \
