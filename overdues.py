@@ -25,7 +25,7 @@ class Overdues:
         db = Postgres(f"dbname=postgres user=postgres password={db_pass}")
         db.run("CREATE EXTENSION IF NOT EXISTS intarray") # required for subracting array of ints from array of ints
         db.run("CREATE TABLE IF NOT EXISTS overdues (patron_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_count INTEGER DEFAULT 0, fee_count INTEGER DEFAULT 0, hold_length INTERVAL DEFAULT CAST('0' AS INTERVAL), hold_remove_time TIMESTAMP, invoice_oids INTEGER[], registrar_hold_count INTEGER DEFAULT 0)")
-        db.run("CREATE TABLE IF NOT EXISTS invoices (invoice_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, registrar_hold BOOLEAN DEFAULT FALSE, hold_length INTERVAL DEFAULT CAST('0' AS INTERVAL), overdue_start_time TIMESTAMP, hold_remove_time TIMESTAMP, ck_oid INTEGER, patron_oid INTEGER, waived BOOLEAN DEFAULT FALSE, expiration TIMESTAMP overdue_lost BOOLEAN DEFAULT FALSE)")
+        db.run("CREATE TABLE IF NOT EXISTS invoices (invoice_oid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0, hold_status BOOLEAN DEFAULT FALSE, fee_status BOOLEAN DEFAULT FALSE, registrar_hold BOOLEAN DEFAULT FALSE, hold_length INTERVAL DEFAULT CAST('0' AS INTERVAL), overdue_start_time TIMESTAMP, hold_remove_time TIMESTAMP, ck_oid INTEGER, patron_oid INTEGER, waived BOOLEAN DEFAULT FALSE, expiration TIMESTAMP, overdue_lost BOOLEAN DEFAULT FALSE)")
         db.run("CREATE TABLE IF NOT EXISTS excluded_allocations (allocation_oid INTEGER PRIMARY KEY, processed TIMESTAMP)")
         db.run("CREATE TABLE IF NOT EXISTS history (time_ran TIMESTAMP, log_file TEXT)")
         return db
@@ -58,12 +58,10 @@ class Overdues:
         _hold = self.connection.apply_invoice_hold(invoice['payload'], message)
         ck_oid = allocation['oid'] if allocation else None
 
-        #####################
-        # create canned message, ticket, and reply
-        # email_subject, email_desc = CannedMessages()
-        # self.rm_connection.create_ticket()
-        # self.rm_connection.email_patron()
-        #####################
+        canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db).get_base()
+        person = self.connection.get_patron(oid, ['email', 'firstName', 'lastName']).json()['payload']
+        ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+        self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
 
         if not invoice_oid:
             print(f"Failed to create invoice for patron with oid {oid}")  # should be better
@@ -122,12 +120,11 @@ class Overdues:
         self.connection.remove_invoice_hold(invoice)  # NOTE: Works, but WCO thows 500 error if hold already gone
         self.connection.waive_invoice(invoice)
 
-        #####################
-        # create canned message, ticket, and reply
-        # email_subject, email_desc = CannedMessages()
-        # self.rm_connection.create_ticket()
-        # self.rm_connection.email_patron()
-        #####################
+        patron_oid = self.db.one('SELECT patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
+        canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db).get_lifted() ## possible issues here if multiple holds
+        person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName']).json()['payload']
+        ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+        self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
 
         # print(f"{invoice['person']['name']} -- {invoice['person']['userid']} -- Hold Removed")
         return invoice
@@ -139,12 +136,11 @@ class Overdues:
             invoice = self.connection.get_invoice(invoice_oid, properties=['patron']).json()['payload']
             self.connection.add_charge(invoice, amount=cost, subtype="Loss", text="")
             
-            #####################
-            # create canned message, ticket, and reply
-            # email_subject, email_desc = CannedMessages()
-            # self.rm_connection.create_ticket()
-            # self.rm_connection.email_patron()
-            #####################
+            patron_oid = self.db.one('SELECT patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
+            canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db).get_charge()
+            person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName']).json()['payload']
+            ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+            self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
                 
             self.db.run("UPDATE invoices " \
                         "SET fee_status = True " \
@@ -192,6 +188,11 @@ class Overdues:
                         invoice = self.place_hold(patron_oid, center, allocation, overdue_time=scheduled_end)
                         invoice_oid = invoice['oid']
 
+                        canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db).get_base()
+                        person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName']).json()['payload']
+                        ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+                        self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
+
                         try:
                             self.texting.add_checkout(allocation['checkoutCenter']['name'], allocation)
                         except Exception as e:
@@ -203,6 +204,11 @@ class Overdues:
                         if allocation['oid'] not in current_fine_allocs:  # only one fee per invoice
                             charge = allocation['aggregateValueOut'] if allocation['aggregateValueOut'] else 2000 # value of checked out items only
                             fee_placed = self.place_fee(invoice_oid, charge)
+
+                            canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db).get_charge()
+                            person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName']).json()['payload']
+                            ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+                            self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
 
                             try:
                                 self.texting.add_checkout(allocation['checkoutCenter']['name'], allocation)
@@ -219,14 +225,6 @@ class Overdues:
                                 
                             self.db.run("UPDATE invoices SET registrar_hold = True WHERE invoice_oid = %(i_id)s", i_id = invoice_oid)
                             self.db.run("UPDATE overdues SET registrar_hold = registrar_hold + 1 WHERE patron_oid = %(p_id)s", p_id = patron_oid)
-                    if invoice:
-                        pass
-                        #####################
-                        # create canned message, ticket, and reply
-                        # email_subject, email_desc = CannedMessages()
-                        # self.rm_connection.create_ticket()
-                        # self.rm_connection.email_patron()
-                        #####################
         
         try:
             self.texting.ticketify()
@@ -329,23 +327,21 @@ class Overdues:
                         invoice = self.place_hold(key, checkout_center=value[5], allocation=value[6], update_db=False)
                         invoice_oid = invoice['oid']
 
-                        #####################
-                        # create canned message, ticket, and reply
-                        # email_subject, email_desc = CannedMessages()
-                        # self.rm_connection.create_ticket()
-                        # self.rm_connection.email_patron()
-                        #####################
+                        patron_oid = self.db.one('SELECT patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
+                        canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db).get_base()
+                        person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName']).json()['payload']
+                        ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+                        self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
 
                 else:
                     invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid = %(a_id)s', a_id = value[6]['oid'])
                     invoice = self.connection.get_invoice(invoice_oid).json()['payload']
 
-                    #####################
-                    # create canned message, ticket, and reply
-                    # email_subject, email_desc = CannedMessages()
-                    # self.rm_connection.create_ticket()
-                    # self.rm_connection.email_patron()
-                    #####################
+                    patron_oid = self.db.one('SELECT patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
+                    canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db).get_charge()
+                    person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName']).json()['payload']
+                    ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+                    self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
 
                 #### insert_query and below postgres need conversion to new db layout
 
@@ -470,12 +466,10 @@ class Overdues:
                 alloc = self.connection.get_allocation(ck_oid, properties=['realEndTime', 'scheduledEndTime', 'realReturnTime', 'rtype', 'checkoutCenter']).json()['payload']
                 conseq, _, _ = self.utils.get_overdue_consequence(alloc)
 
-                #####################
-                # create canned message, ticket, and reply -- use returned canned message
-                # email_subject, email_desc = CannedMessages()
-                # self.rm_connection.create_ticket()
-                # self.rm_connection.email_patron()
-                #####################
+                canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db).get_returned()
+                person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName']).json()['payload']
+                ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+                self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
 
                 with self.db.get_cursor() as cursor:
                     ### NOTE: invoice must already be created for this, and thus count and hold_count are already up to date. Thus don't update
@@ -539,12 +533,6 @@ class Overdues:
             if hold_remove_time and hold_remove_time < now:
                 self.remove_hold(invoice_oid)
                 invoice_oids.append(invoice_oid)
-                #####################
-                # create canned message, ticket, and reply
-                # email_subject, email_desc = CannedMessages()
-                # self.rm_connection.create_ticket()
-                # self.rm_connection.email_patron()
-                #####################
                 if patron_oid in holds_removed:
                     holds_removed[patron_oid]['amount'] += 1
                     holds_removed[patron_oid]['length'] += hold_length
@@ -686,12 +674,10 @@ class Overdues:
             print(f"Patron oid: {patron_oid} -- returned lost item -- {patron['name']} - ({patron['barcode']}) -- Remove Registrar Hold")
 
             # Email
-            #####################
-            # create canned message, ticket, and reply
-            # email_subject, email_desc = CannedMessages()
-            # self.rm_connection.create_ticket()
-            # self.rm_connection.email_patron()
-            #####################
+            canned_subject, canned_description = CannedMessages(invoice_oid, self.connection, self.db, settled=date_back.isoformat(sep=' ', timespec='seconds')).get_returned()
+            person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName']).json()['payload']
+            ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], canned_description, self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+            self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'])
     
     def excluded_allocations(self, allocations: str):
         allocation_list = allocations.split()
