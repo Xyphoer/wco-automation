@@ -511,13 +511,14 @@ class CannedMessages:
     def get_lifted(self):
         patron_name, checkout_center, ck_id, _, count, _, _, invoice_id, _, _ = self._get_checkout_info(self.invoice_oid)
         removal_date = self.db.one("SELECT hold_remove_time FROM invoices WHERE invoice_oid = %(i_oid)s", i_oid=self.invoice_oid)
+        #hold_count = self.db.one("SELECT hold_count FROM overdues WHERE patron_oid = ") ## implement eventually
 
         return {'subject': f"{patron_name} - Overdue Lifted - {ck_id} - {invoice_id}",
                        'description':
                             f"Hello {patron_name}\n\n" \
                             f"The WebCheckout hold for overdue {ck_id} from {checkout_center} InfoLab has been lifted on {removal_date.isoformat(sep=' ', timespec='seconds')}.\n" \
                             "As such, in accordance with our overdue policy (https://kb.wisc.edu/library/131963), you are now eligible to check out equipment " \
-                            "from any Infolab location.\n\n" \
+                            "from any Infolab location provided you no longer have any other outstanding holds.\n\n" \
                             f"Please note that your current overdue item count is: {count}\n\n" \
                             "For any questions or concerns please feel free to reply " \
                             f"or reach out to us at technologycirculation@library.wisc.edu or in person at the {checkout_center} InfoLab.\n\n" \
