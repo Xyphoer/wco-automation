@@ -38,7 +38,7 @@ class Overdues:
         self._remove_holds()
         self._process_current_overdues()
         self._process_expirations()
-        #self._process_lost()
+        self._process_lost()
         self._process_registrar_holds()
  
     def _connect_to_db(self, db_pass) -> Postgres:
@@ -299,6 +299,7 @@ class Overdues:
                         invoice_lines = self.connection.get_invoice_lines(invoice).json()['payload']['result']
                         for invoice_line in invoice_lines:
                             if invoice_line['type'] == 'CHARGE' and not invoice_line['struck']:
+                                self.connection.set_scope(allocation['checkoutCenter']['oid'], "checkoutCenter")
                                 self.connection.strike_invoice_line(invoice, invoice_line)  # APPLY HOLD AGAIN, PAYING REMOVES IT
                                 struck = True
                         if struck:
@@ -351,7 +352,7 @@ class Overdues:
                                                   'True' if conseq['Hold'] else 'False',  # hold_status
                                                   'False',                                # fee_status ALWAYS false for returned items
                                                   conseq['Hold'],                         # hold_length
-                                                  f"'{end_time + timedelta(days=conseq['Hold'])}'::TIMESTAMP" if conseq['Hold'] else 'NULL', # hold_remove_time (from ck end time)
+                                                  f"CAST('{end_time + timedelta(days=conseq['Hold'])}' AS TIMESTAMP)" if conseq['Hold'] else 'NULL', # hold_remove_time (from ck end time)
                                                   checkout_center,    # checkout center for hold
                                                   allocation,         # allocation to attach the hold to, as well as for extra invoice information
                                                   fee_status,         # amount to decriment from database fee_count
@@ -390,7 +391,7 @@ class Overdues:
                     cursor.run("INSERT INTO " \
                                     "overdues (patron_oid, count, hold_count, fee_count, hold_length, hold_remove_time, invoice_oids) " \
                                 "VALUES " \
-                                    "(%(oid)s, %(i_count)s, %(hold_c)s, 0, CAST('%(hold_l)sD' AS INTERVAL), %(hold_rtime)s, %(i_id)s) " \
+                                    "(%(oid)s, %(i_count)s, %(hold_c)s, 0, CAST('%(hold_l)sD' AS INTERVAL)," + f" {value[4]}, " + "%(i_id)s) " \
                                 "ON CONFLICT (patron_oid) DO " \
                                     "UPDATE SET count = overdues.count + EXCLUDED.count, " \
                                     "hold_count = CASE WHEN %(i_id_plain)s = ANY(overdues.invoice_oids) THEN overdues.hold_count ELSE overdues.hold_count + EXCLUDED.hold_count END, " \
@@ -427,10 +428,9 @@ class Overdues:
                                                             hold_c     = 1 if value[1]=='True' else 0,
                                                             fee_c      = value[7],
                                                             hold_l     = value[3],
-                                                            hold_rtime = value[4],
                                                             i_id       = str({invoice_oid}) if invoice_oid else '{}',
                                                             i_id_plain = invoice_oid,
-                                                            r_hold_c   = value[8])
+                                                            r_hold_c   = value[8]) # hold_rtime = value[4],
                     back_hold_remove_time, overdues_count = cursor.fetchone() # gives datetime.datetime object for extended hold_remove time of sequential invoices
                 
                 hold_len = value[3]
@@ -627,15 +627,47 @@ class Overdues:
                         "WHERE invoice_oid IN %(i_ids)s", i_ids = tuple(invoice_oids))
     
     def _process_lost(self):
-        lost_overdues = self.db.all("SELECT ck_oid FROM invoices WHERE overdue_start_time < ('NOW'::TIMESTAMP - '6Months'::INTERVAL) AND NOT overdue_lost")
-        
-        with open(f"Lost Logs/Lost Items {datetime.now().isoformat(timespec='seconds').replace(':','_')}.csv", 'w') as csv:
-            csv.write('item oid, item name, item serial number, item barcode, item type path, item creation date, checkout oid, checkout id, patron oid, patron name, patron wiscard, due date\n')
+        lost_overdues = self.db.all("SELECT invoice_oid, ck_oid FROM invoices WHERE overdue_start_time < ('NOW'::TIMESTAMP - '6Months'::INTERVAL) AND NOT overdue_lost AND NOT waived")
+        prev_lost = self.db.all("SELECT invoice_oid, ck_oid FROM invoices WHERE overdue_lost")
+
+        # need safety for if folder doesn't exist, and to make it
+        with open(f"../Lost Logs/Lost Items {datetime.now().isoformat(timespec='seconds').replace(':','_')}.csv", 'w') as csv:
+            csv.write('item oid, item name, item serial number, item barcode, item type path, item creation date, checkout id, patron name, patron wiscard, patron status\n')
             
-            for allocation_oid in lost_overdues:
-                alloc = self.connection.get_allocation(allocation_oid, ['uniqueId', 'scheduledEndTime',
+            for lost_ck in prev_lost:
+                invoice_oid, allocation_oid = lost_ck[0], lost_ck[1]
+                alloc = self.connection.get_allocation(allocation_oid, ['uniqueId', 'scheduledEndTime', 'checkoutCenter',
                     {'property': 'patron',
-                        'subProperties': ['name', 'barcode']},
+                        'subProperties': ['name', 'barcode', 'status']},
+                    {'property': 'items',
+                        'subProperties': ['name',
+                                            {'property': 'resource',
+                                                'subProperties': ['serialNumber', 'creationDate', 'resourceTypePath', 'barcode']
+                                            }
+                                        ]
+                    }]).json()
+                for item in alloc['payload']['items']:
+                    csv.write(', '.join([str(item['resource']['oid']),
+                                        item['name'],
+                                        str(item['resource']['serialNumber']),
+                                        item['resource']['barcode'],
+                                        ''.join(item['resource']['resourceTypePath']),
+                                        datetime.strptime(item['resource']['creationDate'], '%Y-%m-%dT%H:%M:%S.%f%z').isoformat(sep=' ', timespec='seconds'),
+                                        alloc['payload']['uniqueId'],
+                                        alloc['payload']['patron']['name'],
+                                        alloc['payload']['patron']['barcode'],
+                                        alloc['payload']['patron']['status']]) + '\n')
+
+            for lost_ck in lost_overdues:
+                invoice_oid, allocation_oid = lost_ck[0], lost_ck[1]
+
+                #stopgap - cleanup
+                if invoice_oid == -1:
+                    continue # should actually delete references -- add later
+
+                alloc = self.connection.get_allocation(allocation_oid, ['uniqueId', 'scheduledEndTime', 'checkoutCenter',
+                    {'property': 'patron',
+                        'subProperties': ['name', 'barcode', 'status']},
                     {'property': 'items',
                         'subProperties': ['name',
                                             {'property': 'resource',
@@ -644,6 +676,7 @@ class Overdues:
                                         ]
                     }]).json()
                 
+                self.connection.set_scope(alloc['payload']['checkoutCenter']['oid'], 'checkoutCenter')
                 self.connection.return_allocation(alloc['payload'])
 
                 for item in alloc['payload']['items']:
@@ -659,17 +692,16 @@ class Overdues:
                                         datetime.strptime(item['resource']['creationDate'], '%Y-%m-%dT%H:%M:%S.%f%z').isoformat(sep=' ', timespec='seconds'),
                                         alloc['payload']['uniqueId'],
                                         alloc['payload']['patron']['name'],
-                                        alloc['payload']['patron']['barcode']]) + '\n')
+                                        alloc['payload']['patron']['barcode'],
+                                        alloc['payload']['patron']['status']]) + '\n')
 
                 self.db.run("UPDATE invoices SET overdue_lost = True WHERE ck_oid = %(ck_oid)s", ck_oid = allocation_oid)
 
-                    ## Email
-                    #####################
-                    # create canned message, ticket, and reply
-                    # email_subject, email_desc = CannedMessages()
-                    # self.rm_connection.create_ticket()
-                    # self.rm_connection.email_patron()
-                    #####################
+                canned = CannedMessages(invoice_oid, self.connection, self.db).get_lost()
+                canned_subject, canned_description = canned['subject'], canned['description']
+                person = self.connection.get_patron(alloc['payload']['patron']['oid'], ['email', 'firstName', 'lastName', 'name', 'barcode']).json()['payload']
+                ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], '', self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+                self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], canned_description)
         
         # maybe do resources instead of full checkouts?
         allocations = input("Lost Returned allocations (whitespace seperation): ")
@@ -801,7 +833,7 @@ class Overdues:
                 
             self.db.run("UPDATE overdues SET hold_count = hold_count - %(hold_amount)s, " \
                             "fee_count = fee_count - %(fee_amount)s, " \
-                            "registrar_hold_count = registrar_hold_count - %(reg_hold)s " \
+                            "registrar_hold_count = registrar_hold_count - %(reg_hold)s, " \
                             "invoice_oids = invoice_oids - '{%(i_id)s}'::integer[]"
                         "WHERE patron_oid = %(p_id)s",
                             hold_amount = int(prev_status[0]),

@@ -391,11 +391,12 @@ class Texting(RedmineConnection):
                                             f"Patron Name: {checkout['patron']['name']}\n\n" \
                                             f"- Texted {time_now.strftime('%m/%d/%Y')}\n\n")
 
+                    overdue_items = [item['resource']['name'] for item in checkout['items'] if item['state'] == 'CHECKOUT']
                     new_ticket = self.session.post(url=f'https://redmine.library.wisc.edu/issues.json',
                                     json={'issue': {'project_id': self.project_id,
                                                     'status_id': 10, # resolved
                                                     'custom_fields': [{"value": center.title(), "id": self.custom_field['id']}],
-                                                    'subject': f"Overdue {', '.join(checkout.split(' - ')[-1] for checkout in checkout['itemNames'])} - Contact Log\n",
+                                                    'subject': f"Overdue {', '.join(overdue_items)} - Contact Log\n",
                                                     'description': issue_description}})
                     
                     #print(new_ticket.json())
@@ -527,3 +528,25 @@ class CannedMessages:
                             "For any questions or concerns please feel free to reply " \
                             f"or reach out to us at technologycirculation@library.wisc.edu or in person at the {checkout_center} InfoLab.\n\n" \
                             "Best,"}
+    
+    def get_lost(self):
+        patron_name, checkout_center, ck_id, due_date, count, item_names, classifications, invoice_id, charge, _ = self._get_checkout_info(self.invoice_oid)
+
+        self._lost_item_list = '\n'.join([f'- {item_name} - {classification}\n' for item_name, classification in zip(item_names, classifications)])
+
+        return {'subject': f"{patron_name} - Declared Lost - {ck_id} - {invoice_id}",
+                'description':
+                    f"Hello {patron_name}\n\n" \
+                    f"Your checkout {ck_id} from {checkout_center} InfoLab has been declared lost on {datetime.now().strftime('%m/%d/%Y')}.\n" \
+                    "You will have received a return email notice as we believe the item has been lost. " \
+                    "As such a replacement fee will remain on your WebCheckout account until the item has been returned or the fee paid.\n\n" \
+                    "Additionally, a registrar hold and WebCheckout hold will remain in effect until return or payment.\n" \
+                    f"Please refer to our overdue policy (https://kb.wisc.edu/library/131963) for more information.\n\n" \
+                    f"{self._lost_item_list}\n" \
+                    f"Total Charge: {charge}\n" \
+                    f"Please note that your historical overdue item count is: {count}\n\n" \
+                    f"To resolve this invoice, either return the overdue items to {checkout_center} InfoLab, " \
+                    "or pay the total amount at College Library InfoLab (2nd floor computer lab in College Library).\n\n" \
+                    "For any questions or concerns please feel free to reply " \
+                    f"or reach out to us at technologycirculation@library.wisc.edu or in person at the {checkout_center} InfoLab.\n\n" \
+                    "Best,"}
