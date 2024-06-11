@@ -316,7 +316,10 @@ class Texting(RedmineConnection):
         self.location_options = self.wco_connection.centers.keys()
 
     def add_checkout(self, location, checkout):
-        self.location_checkout_pairs[location.lower()].append(checkout)
+        try:
+            self.location_checkout_pairs[location.lower()].append(checkout)
+        except KeyError as e:
+            self.location_checkout_pairs[location.lower()] = [checkout]
 
     # sketchy
     def ticketify(self):
@@ -379,7 +382,7 @@ class Texting(RedmineConnection):
                             found = True
                             break
 
-                elif not found:
+                if not found:
                     #### FIX so that doesn't include returned part of partially returned allocation in overdue list (subject) [use contents, see tmp.txt]
                     issue_description = (f"{checkout['patron']['name']} - {checkout['patronPreferredEmail']}\n" \
                                             f"Item Due {timestamp_formatted.strftime('%m/%d/%Y')}\n\n" \
@@ -430,56 +433,56 @@ class CannedMessages:
 
     def _get_checkout_info(self, invoice_oid: int):
         ck_oid, patron_oid = self.db.one('SELECT ck_oid, patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
-        allocation = self.wco_conn.get_allocation(ck_oid, ['items', 'patron', 'scheduledEndTime', 'checkoutCenter', 'realEndTime'])
+        allocation = self.wco_conn.get_allocation(ck_oid, ['items', 'patron', 'scheduledEndTime', 'checkoutCenter', 'realEndTime', 'uniqueId']).json()['payload']
         count = self.db.one('SELECT count FROM overdues WHERE patron_oid = %(p_oid)s', p_oid=patron_oid)
         invoice = self.wco_conn.get_invoice(invoice_oid).json()['payload']
         invoice_lines = self.wco_conn.get_invoice_lines(invoice).json()['payload']['result']
 
         classifications = []
         item_name = []
-        charges = []
+        charge = 0
 
         for item in allocation['items']:
             classifications.append(item['rtype']['path'])
             item_name.append(item['resource']['name'])
         
-            amount = 0
-            for invoice_line in invoice_lines:
-                if invoice_line['resource']['oid'] == item['resource']['oid']:
-                    amount = invoice_line['amount'] / 100
-            charges.append(amount)
+        amount = 0
+        for invoice_line in invoice_lines:
+            charge += invoice_line['amount'] / 100
+
+        returned_date = datetime.strptime(allocation['realEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z').isoformat(sep=' ', timespec='seconds') if allocation['realEndTime'] else None
         
-        return (allocation['patron']['name'], allocation['checkoutCenter']['name'], ck_oid,
+        return (allocation['patron']['name'], allocation['checkoutCenter']['name'], allocation['uniqueId'],
                 datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z').isoformat(sep=' ', timespec='seconds'),
-                count, item_name, classifications, invoice['name'], charges, self.settled if self.settled else datetime.strptime(allocation['realEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z').isoformat(sep=' ', timespec='seconds'))
+                count, item_name, classifications, invoice['name'], charge, self.settled if self.settled else returned_date)
 
     def get_base(self):
         patron_name, checkout_center, ck_id, due_date, count, item_names, classifications, invoice_id, _, _ = self._get_checkout_info(self.invoice_oid)
 
-        self._base_item_list = '\n'.join([f'- {item_name} - {classification}\n' for item_name, classification in (item_names, classifications)])
+        self._base_item_list = '\n'.join([f'- {item_name} - {classification}\n' for item_name, classification in zip(item_names, classifications)])
         return {'subject': f"{patron_name} - Overdue - {ck_id} - {invoice_id}",
                      'description':
                         f"Hello {patron_name}\n\n" \
                         f"Your Checkout {ck_id} from {checkout_center} InfoLab was due back {due_date}.\n" \
                         "As such, a hold has been placed on your WebCheckout account in regards to the overdue policy (https://kb.wisc.edu/library/131963) for the following items:\n\n" \
                         f"{self._base_item_list}\n" \
-                        f"Please note that your current overdue item count is: {count}\n\n" \
+                        f"Please note that your historical overdue item count is: {count}\n\n" \
                         "Please return or contact us as soon as possible. For any questions or concerns please feel free to reply " \
                         f"or reach out to us at technologycirculation@library.wisc.edu or in person at the {checkout_center} InfoLab.\n\n" \
                         "Best,"}
 
     def get_charge(self):
-        patron_name, checkout_center, ck_id, due_date, count, item_names, classifications, invoice_id, charges, _ = self._get_checkout_info(self.invoice_oid)
+        patron_name, checkout_center, ck_id, due_date, count, item_names, classifications, invoice_id, charge, _ = self._get_checkout_info(self.invoice_oid)
 
-        self._charge_item_list = '\n'.join([f'- {item_name} - {classification} - ${charge}\n' for item_name, classification, charge in (item_names, classifications, charges)])
+        self._charge_item_list = '\n'.join([f'- {item_name} - {classification}\n' for item_name, classification in zip(item_names, classifications)])
         return {'subject': f"{patron_name} - Overdue Charge - {ck_id} - {invoice_id}",
                        'description':
                             f"Hello {patron_name}\n\n" \
                             f"Your checkout {ck_id} from {checkout_center} InfoLab was due back {due_date}.\n" \
                             "As such, a hold has been placed on your WebCheckout account in regards to the overdue policy (https://kb.wisc.edu/library/131963) for the following items:\n\n" \
                             f"{self._charge_item_list}\n" \
-                            f"Total Charge: {sum(charges)}\n" \
-                            f"Please note that your current overdue item count is: {count}\n\n" \
+                            f"Total Charge: {charge}\n" \
+                            f"Please note that your historical overdue item count is: {count}\n\n" \
                             f"To resolve this invoice, either return the overdue items to {checkout_center} InfoLab, " \
                             "or pay the total amount at College Library InfoLab (2nd floor computer lab in College Library).\n\n" \
                             "For any questions or concerns please feel free to reply " \
@@ -493,17 +496,17 @@ class CannedMessages:
         if not return_date:
             return False
 
-        self._base_item_list = '\n'.join([f'- {item_name} - {classification}\n' for item_name, classification in (item_names, classifications)])
+        self._base_item_list = '\n'.join([f'- {item_name} - {classification}\n' for item_name, classification in zip(item_names, classifications)])
         return {'subject': f"{patron_name} - Overdue Return - {ck_id} - {invoice_id}",
                          'description':
                             f"Hello {patron_name}\n\n" \
                             f"Your overdue checkout {ck_id} from {checkout_center} InfoLab has been resolved on {return_date}.\n" \
                             f"As such, any fee or register hold will be removed within a few business days. " \
-                            f"A WebCheckout hold on your account will remain in effect for {hold_length} days after the return in accordance to the overdue policy " \
+                            f"A WebCheckout hold on your account will remain in effect for {hold_length.days} days after the return in accordance to the overdue policy " \
                             "(https://kb.wisc.edu/library/131963) for the following items:\n\n" \
                             f"{self._base_item_list}\n" \
                             f"Final WebCheckout Hold Removal Date: {removal_date.isoformat(sep=' ', timespec='seconds')}\n" \
-                            f"Please note that your current overdue item count is: {count}\n\n" \
+                            f"Please note that your historical overdue item count is: {count}\n\n" \
                             "For any questions or concerns please feel free to reply " \
                             f"or reach out to us at technologycirculation@library.wisc.edu or in person at the {checkout_center} InfoLab.\n\n" \
                             "Best,"}
@@ -511,14 +514,16 @@ class CannedMessages:
     def get_lifted(self):
         patron_name, checkout_center, ck_id, _, count, _, _, invoice_id, _, _ = self._get_checkout_info(self.invoice_oid)
         removal_date = self.db.one("SELECT hold_remove_time FROM invoices WHERE invoice_oid = %(i_oid)s", i_oid=self.invoice_oid)
+        if not removal_date:
+            removal_date = datetime.now()
 
         return {'subject': f"{patron_name} - Overdue Lifted - {ck_id} - {invoice_id}",
                        'description':
                             f"Hello {patron_name}\n\n" \
                             f"The WebCheckout hold for overdue {ck_id} from {checkout_center} InfoLab has been lifted on {removal_date.isoformat(sep=' ', timespec='seconds')}.\n" \
                             "As such, in accordance with our overdue policy (https://kb.wisc.edu/library/131963), you are now eligible to check out equipment " \
-                            "from any Infolab location.\n\n" \
-                            f"Please note that your current overdue item count is: {count}\n\n" \
+                            "from any Infolab location provided there are no additional holds on your account.\n\n" \
+                            f"Please note that your historical overdue item count is: {count}\n\n" \
                             "For any questions or concerns please feel free to reply " \
                             f"or reach out to us at technologycirculation@library.wisc.edu or in person at the {checkout_center} InfoLab.\n\n" \
                             "Best,"}
