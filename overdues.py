@@ -231,7 +231,10 @@ class Overdues:
                             print(e)
 
                     else:
-                        invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid=%(id)s', id=allocation['oid'])
+                        invoice_oids = self.db.all('SELECT invoice_oid FROM invoices WHERE ck_oid=%(id)s AND NOT waived', id=allocation['oid'])
+                        invoice_oid = invoice_oids[0]
+                        if len(invoice_oids) > 1:
+                            print(f'checkout {allocation["oid"]} has multiple invoices, proceeding with {invoice_oid}')
                     if consequences['Fee']:
                         if allocation['oid'] not in current_fine_allocs:  # only one fee per invoice
                             charge = allocation['aggregateValueOut'] if allocation['aggregateValueOut'] else 2000 # value of checked out items only
@@ -627,8 +630,9 @@ class Overdues:
                         "WHERE invoice_oid IN %(i_ids)s", i_ids = tuple(invoice_oids))
     
     def _process_lost(self):
-        lost_overdues = self.db.all("SELECT invoice_oid, ck_oid FROM invoices WHERE overdue_start_time < ('NOW'::TIMESTAMP - '6Months'::INTERVAL) AND NOT overdue_lost AND NOT waived")
-        prev_lost = self.db.all("SELECT invoice_oid, ck_oid FROM invoices WHERE overdue_lost")
+        lost_overdues = self.db.all("SELECT invoice_oid, ck_oid FROM invoices WHERE overdue_start_time < ('NOW'::TIMESTAMP - '6Months'::INTERVAL) AND NOT overdue_lost AND NOT waived AND hold_remove_time IS NULL")
+        year_now = datetime.now().year
+        prev_lost = self.db.all(f"SELECT invoice_oid, ck_oid FROM invoices WHERE overdue_lost AND overdue_start_time > CAST(01-01-{year} AS TIMESTAMP)")
 
         # need safety for if folder doesn't exist, and to make it
         with open(f"../Lost Logs/Lost Items {datetime.now().isoformat(timespec='seconds').replace(':','_')}.csv", 'w') as csv:
@@ -767,8 +771,9 @@ class Overdues:
             self.db.run("UPDATE invoices SET " \
                             "fee_status = false, " \
                             "registrar_hold = false, " \
-                            "hold_length = %(hold_l)s" \
-                            "hold_remove_time = %(hold_rtime)s::TIMESTAMP " \
+                            "hold_length = %(hold_l)s, " \
+                            "hold_remove_time = %(hold_rtime)s::TIMESTAMP, " \
+                            "overdue_lost = False, "
                         "WHERE invoice_oid = %(i_oid)s", hold_l = hold_len, hold_rtime = back_hold_remove_time, i_oid = invoice_oid)
             
 
