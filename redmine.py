@@ -285,12 +285,12 @@ class RedmineConnection:
                                  }})
 
     # no email sent to contact
-    def create_ticket(self, subject: str, contact_email: str, contact_first_name: str = '', contact_last_name: str = '', description: str = '', status_id: int = None, project_id: int = None):
+    def create_ticket(self, subject: str, contact_email, contact_first_name: str = '', contact_last_name: str = '', description: str = '', status_id: int = None, project_id: int = None):
         return self.session.post(url = self.host + '/helpdesk_tickets.json',
                                  json = {"helpdesk_ticket": {
                                             "issue": {
                                                 "project_id": project_id if project_id else self.project_id,
-                                                "status_id": status_id if status_id else self.status['resolved'],
+                                                "status_id": status_id if status_id else self.statuses['Resolved'],
                                                 "description": description,
                                                 "subject": subject
                                                 },
@@ -325,6 +325,11 @@ class Texting(RedmineConnection):
     def ticketify(self):
         time_now = datetime.now()
         for center in self.location_checkout_pairs:
+
+            ##### temporary blocker for not processing InfoLabs who haven't asked for texting
+            if center not in ('college library', 'memorial library'):
+                continue
+
             print(f"---{center}---\n")
 
             phone_numbers = []
@@ -392,16 +397,17 @@ class Texting(RedmineConnection):
                                             f"- Texted {time_now.strftime('%m/%d/%Y')}\n\n")
 
                     overdue_items = [item['resource']['name'] for item in checkout['items'] if item['state'] == 'CHECKOUT']
-                    new_ticket = self.session.post(url=f'https://redmine.library.wisc.edu/issues.json',
-                                    json={'issue': {'project_id': self.project_id,
-                                                    'status_id': 10, # resolved
-                                                    'custom_fields': [{"value": center.title(), "id": self.custom_field['id']}],
-                                                    'subject': f"Overdue {', '.join(overdue_items)} - Contact Log\n",
-                                                    'description': issue_description}})
+                    new_ticket = self.create_ticket(subject=f"Overdue {', '.join(overdue_items)} - Contact Log\n", contact_email=checkout['patronPreferredEmail'], description=issue_description, project_id=self.project_id)
+                    # new_ticket = self.session.post(url=f'https://redmine.library.wisc.edu/issues.json',
+                    #                 json={'issue': {'project_id': self.project_id,
+                    #                                 'status_id': 10, # resolved
+                    #                                 'custom_fields': [{"value": center.title(), "id": self.custom_field['id']}],
+                    #                                 'subject': f"Overdue {', '.join(overdue_items)} - Contact Log\n",
+                    #                                 'description': issue_description}})
                     
                     #print(new_ticket.json())
                     
-                    print(f'Ticket #{new_ticket.json()["issue"]["id"]} for {checkout["patron"]["name"]} created.')
+                    print(f'Ticket #{new_ticket.json()["helpdesk_ticket"]["id"]} for {checkout["patron"]["name"]} created.')
         
             phone_numbers.sort()
 
