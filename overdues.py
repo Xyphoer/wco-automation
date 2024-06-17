@@ -139,7 +139,8 @@ class Overdues:
 
     # remove a specific hold
     def remove_hold(self, invoice_oid: int):
-        invoice = self.connection.get_invoice(invoice_oid, ['person']).json()['payload']
+        invoice = self.connection.get_invoice(invoice_oid, ['person', 'checkoutCenter']).json()['payload']
+        self.connection.set_scope(invoice['checkoutCenter']['oid'], "checkoutCenter")
         self.connection.remove_invoice_hold(invoice)  # NOTE: Works, but WCO thows 500 error if hold already gone
         self.connection.waive_invoice(invoice)
 
@@ -284,9 +285,12 @@ class Overdues:
         excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations')
         excluded_checkouts.extend(self.db.all('SELECT ck_oid FROM invoices WHERE overdue_lost'))
 
-        response = self.connection.get_completed_overdue_allocations(start_search_time, end_search_time)
+        # if not specific_checkouts:
+        allocations = self.connection.get_completed_overdue_allocations(start_search_time, end_search_time).json()['payload']['result']
+        # else:
+        #     allocations = specific_checkouts
 
-        for allocation in response.json()['payload']['result']:
+        for allocation in allocations:
             if allocation['oid'] not in excluded_checkouts:
                 # retrieve policy consequences based on allocation items, types, and overdue length (planned incorporation of count here instead of in sql upserts)
                 conseq, end_time, checkout_center = self.utils.get_overdue_consequence(allocation)
@@ -604,7 +608,7 @@ class Overdues:
 
         for patron_oid, hold_length, hold_remove_time, invoice_oid in potential_holds:
             if hold_remove_time and hold_remove_time < now:
-                #self.remove_hold(invoice_oid)
+                self.remove_hold(invoice_oid)
                 invoice_oids.append(invoice_oid)
                 if patron_oid in holds_removed:
                     holds_removed[patron_oid]['amount'] += 1
@@ -631,7 +635,7 @@ class Overdues:
     def _process_lost(self):
         lost_overdues = self.db.all("SELECT invoice_oid, ck_oid FROM invoices WHERE overdue_start_time < ('NOW'::TIMESTAMP - '6Months'::INTERVAL) AND NOT overdue_lost AND NOT waived AND hold_remove_time IS NULL")
         year_now = datetime.now().year
-        prev_lost = self.db.all(f"SELECT invoice_oid, ck_oid FROM invoices WHERE overdue_lost AND overdue_start_time > CAST(01-01-{year_now} AS TIMESTAMP)")
+        prev_lost = self.db.all(f"SELECT invoice_oid, ck_oid FROM invoices WHERE overdue_lost AND overdue_start_time > CAST('01-01-{year_now}' AS TIMESTAMP)")
 
         # need safety for if folder doesn't exist, and to make it
         with open(f"../Lost Logs/Lost Items {datetime.now().isoformat(timespec='seconds').replace(':','_')}.csv", 'w') as csv:
@@ -889,6 +893,42 @@ class Overdues:
                                                     self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
             self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], description)
             print(f"Email for registrar changes: {ticket.json()['helpdesk_ticket']['id']}")
+    
+    # checks that all waived invoices (with a hold) have been properly waived in WCO
+    def check_waived_invoices(self):
+        invoice_oids = self.db.all("SELECT invoice_oid FROM invoices WHERE hold_status AND waived")
+        removed = []
+        for invoice_oid in invoice_oids:
+            invoice = self.connection.get_invoice(invoice_oid, ['invoiceStatus']).json()['payload']
+            if invoice['invoiceStatus'].lower() != 'waived':
+                self.remove_hold(invoice_oid)
+                removed.append(invoice_oid)
+        return removed
+    
+    # basic moving of end times from invoices to overdues
+    def forward_invoice_end_times(self):
+        patron_oids = self.db.all('SELECT patron_oid FROM overdues')
+        for patron_oid in patron_oids:
+            remove_times = self.db.all(f'SELECT hold_remove_time FROM invoices WHERE patron_oid = {patron_oid}')
+            if not remove_times:
+                remove_times = [None]
+            times = [time for time in remove_times if time is not None]
+            latest = max(times) if times else None
+            if latest == None:
+                latest = 'NULL'
+            else:
+                latest = f"CAST('{latest}' AS TIMESTAMP)"
+            self.db.run(f'UPDATE overdues SET hold_remove_time = {latest} WHERE patron_oid = {patron_oid}')
+    
+    # check for dropped overdues, where a returned checkout doesn't have an end time in db
+    # need to add: time offset (only look at checkouts a certain amount of time overdue), >=12 count checker (should have inf hold)
+    # add a method for adding idividual checkouts to check returned overdues
+    def check_dropped_overdues(self):
+        ck_oids = self.db.all('SELECT ck_oid FROM invoices WHERE hold_status AND hold_remove_time IS NULL AND NOT waived AND NOT overdue_lost')
+        for ck_oid in ck_oids:
+            ck = self.connection.get_allocation(ck_oid, ['allocationState']).json()['payload']
+            if ck['allocationState'] == 'CHECKOUT-COMPLETED':
+                print(ck['name'], ck_oid)
 
     # balance invoice and overdues databases
     # reconciling hold_length, hold_remove_time, hold_status, fee_status, and registrar_hold

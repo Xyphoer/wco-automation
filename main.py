@@ -173,6 +173,7 @@ try:
         texting = Texting(wco_connection, redmine_host, redmine_auth_key)
         redmine_conn = RedmineConnection(wco_connection, redmine_host, redmine_auth_key)
         oconn = Overdues(wco_connection, utils(wco_connection), redmine_conn, texting, postgres_pass)
+        # oconn.check_waived_invoices()
         while overdues_correct_date_range.lower()[:1] != 'y':
             overdues_start = input("Overdues Start Date (mm/dd/yyyy): ")
             overdues_start_dt = datetime.strptime(overdues_start, '%m/%d/%Y') if '/' in overdues_start else oconn.last_run()
