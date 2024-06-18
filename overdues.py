@@ -17,7 +17,9 @@ class Overdues:
         self.register_changes_email=''
         self.register_changes_name_first=''
         self.register_changes_name_last=''
-        with open('config.txt', 'r') as config:
+
+        chdir('C:/Users/Public/Downloads/wco-automation')
+        with open('config.txt', 'r') as config: # can be bad if not calling from program directory. Make un-ambiguous
             for line in config:
                 if "register_changes_email" in line.lower():
                     self.register_changes_email = line.split("=", maxsplit=1)[1].strip()
@@ -657,7 +659,7 @@ class Overdues:
     def _process_lost(self):
         lost_overdues = self.db.all("SELECT invoice_oid, ck_oid FROM invoices WHERE overdue_start_time < ('NOW'::TIMESTAMP - '6Months'::INTERVAL) AND NOT overdue_lost AND NOT waived AND hold_remove_time IS NULL")
         year_now = datetime.now().year
-        prev_lost = self.db.all(f"SELECT invoice_oid, ck_oid FROM invoices WHERE overdue_lost AND overdue_start_time > CAST('01-01-{year_now}' AS TIMESTAMP)")
+        prev_lost = self.db.all(f"SELECT invoice_oid, ck_oid FROM invoices WHERE overdue_lost AND overdue_start_time < CAST('01-01-{year_now}' AS TIMESTAMP)")
 
         # need safety for if folder doesn't exist, and to make it
         with open(f"../Lost Logs/Lost Items {datetime.now().isoformat(timespec='seconds').replace(':','_')}.csv", 'w') as csv:
