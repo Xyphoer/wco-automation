@@ -42,8 +42,11 @@ class Overdues:
         self._remove_holds()
         print("Processing current overdues...")
         self._process_current_overdues()
+        print("Processing expirations...")
         self._process_expirations()
+        print("Processing lost...")
         self._process_lost()
+        print("Processing registrar holds...")
         self._process_registrar_holds()
  
     def _connect_to_db(self, db_pass) -> Postgres:
