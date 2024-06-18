@@ -38,8 +38,8 @@ class Connection:
             "memorial": self.memorial,
             "merit": self.merit}
 
-        # set the scope to College to start
-        self.scope = self.set_scope()
+        # set the scope to LTG org to start
+        self.scope = self.set_scope(self.college['organization']['oid'])
 
     #####
     # Name: start_session
@@ -56,14 +56,14 @@ class Connection:
 
     #####
     # Name: set_scope
-    # Inputs: None
+    # Inputs: _class ("organization" or "checkout-center"), location_oid (int)
     # Output: Scope information
     # Description: Sets the scope of the session to College Library
     #####
-    def set_scope(self):
+    def set_scope(self, location_oid: int, _class: str = "organization"):
         return self.request_session.post(url = self.host + "/rest/session/setSessionScope",
                       headers = {"Authorization": "Bearer " + self.session_token},
-                      json = {"checkoutCenter": {"_class": "checkout-center", "oid": self.college['organization']['oid']}})
+                      json = {"checkoutCenter": {"_class": _class, "oid": location_oid}})
     
     #####
     # Name: get_checkouts
@@ -92,6 +92,18 @@ class Connection:
         sorted_allocs.sort(key = lambda person: person['patron']['oid'])
 
         return sorted_allocs
+
+    def get_patron_checkouts(self, patron_oid: int, properties = []):
+        patron = self.get_patron(patron_oid).json()['payload']
+        if properties:
+            return self.request_session.post(url = self.host + "/rest/allocation/search",
+                                             headers = {"Authorization": "Bearer " + self.session_token},
+                                             json = {"properties": properties,
+                                                     "query": {"patron": patron}})
+        else:
+            return self.request_session.post(url = self.host + "/rest/allocation/search",
+                                             headers = {"Authorization": "Bearer " + self.session_token},
+                                             json = {"query": {"patron": patron}})
     
     def get_new_overdues(self, center) -> list:
         allocs = []
@@ -180,6 +192,54 @@ class Connection:
                              json = {"oid": patron_oid,
                                     "properties": ["defaultAccount"]})
     
+    def get_resource(self, resource_oid: int, properties = []):
+        if properties:
+            return self.request_session.post(url = self.host + "/rest/resource/get",
+                                            headers = {"Authorization": "Bearer " + self.session_token},
+                                            json = {"oid": resource_oid,
+                                                    "properties": properties})
+        else:
+            return self.request_session.post(url = self.host + "/rest/resource/get",
+                                            headers = {"Authorization": "Bearer " + self.session_token},
+                                            json = {"oid": resource_oid})
+    
+    def get_allocation(self, allocation_oid: int, properties = []):
+        if properties:
+            return self.request_session.post(url = self.host + "/rest/allocation/get",
+                                            headers = {"Authorization": "Bearer " + self.session_token},
+                                            json = {"oid": allocation_oid,
+                                                    "properties": properties})
+        else:
+            return self.request_session.post(url = self.host + "/rest/allocation/get",
+                                            headers = {"Authorization": "Bearer " + self.session_token},
+                                            json = {"oid": allocation_oid})
+    
+    def return_allocation(self, allocation):
+        return self.request_session.post(url = self.host + "/rest/allocation/returnAllocation",
+                                         headers = {"Authorization": "Bearer " + self.session_token},
+                                         json = {"allocation": allocation})
+    
+    def delete_resource(self, resource_oid: int):
+        delete_check = self.get_resource(resource_oid, ['deletable', 'deleted']).json()
+        deletable, deleted = delete_check['payload']['deletable'], delete_check['payload']['deleted']
+
+        # make more consistent return
+        if deleted:
+            return "already deleted"
+        elif not deletable:
+            return "cannot delete"
+        else:
+            return self.request_session.post(url = self.host + "/rest/resource/update",
+                                             headers = {"Authorization": "Bearer " + self.session_token},
+                                             json = {"oid": resource_oid,
+                                                     "values": {"deleted": True}})
+    
+    def undelete_resource(self, resource_oid: int):
+        return self.request_session.post(url = self.host + "/rest/resource/update",
+                                            headers = {"Authorization": "Bearer " + self.session_token},
+                                            json = {"oid": resource_oid,
+                                                    "values": {"deleted": False}})
+    
     def get_completed_overdue_allocations(self, start_time: datetime, end_time: datetime):
         earliest_actual_end = start_time.isoformat()
         latest_scheduled_end = (start_time - timedelta(minutes=10)).isoformat()  # 10 minute grace period
@@ -264,6 +324,12 @@ class Connection:
                                     "checkoutCenter": center,
                                     "description": description})
     
+    def update_invoice(self, invoice_oid: int, update_dict: dict):
+        return self.request_session.post(url = self.host + "/rest/invoice/update",
+                                         headers = {"Authorization": "Bearer " + self.session_token},
+                                         json = {'oid': invoice_oid,
+                                                 'values': update_dict})
+    
     def waive_invoice(self, invoice, comment: str = '') -> requests.Response:
         return self.request_session.post(url = self.host + "/rest/invoice/waiveInvoices",
                             headers = {"Authorization": "Bearer " + self.session_token},
@@ -294,12 +360,13 @@ class Connection:
     #              Subtype must be one of "Abuse Fine", "Late Fine", "Loss", "Damage", "Usage Fee", "Supplies",
     #              "Overtime", "Labor", "Shipping", or "Other."
     #####
-    def add_charge(self, invoice, amount, subtype: str):
+    def add_charge(self, invoice, amount, subtype: str, text: str = ''):
         return self.request_session.post(url = self.host + "/rest/invoice/addCharge",
                             headers = {"Authorization": "Bearer " + self.session_token},
                             json = {"amount": amount,
                                     "invoice": invoice,
-                                    "subtype": subtype})
+                                    "subtype": subtype,
+                                    "text": text})
     
     def add_invoice_note(self, invoice, text: str):
         return self.request_session.post(url = self.host + "/rest/invoice/addNote",

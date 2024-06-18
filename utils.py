@@ -285,16 +285,11 @@ class utils:
         
         return results
     
-    def get_overdue_consequence(self, allocation) -> tuple:
+    def get_overdue_consequence(self, allocation) -> tuple[dict, datetime, dict]:
         alloc_end_time = datetime.strptime(allocation['realEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
 
         scheduled_end = datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
         tz = timezone(timedelta(hours=-6), name='utc-6')
-
-        # NOW BACKTRACKING
-        # policy_start_date = datetime(year=2024, month=1, day=23, tzinfo=tz)
-        # if scheduled_end < policy_start_date:
-        #     scheduled_end = policy_start_date
 
         type_buckets = {}
         for item in allocation['items']:
@@ -316,11 +311,11 @@ class utils:
         final_result = results[0]
         for result in results[1:]:
             if result['Registrar Hold'] and not final_result['Registrar Hold']:
-                final_result = result
-            elif result['Fee'] and not final_result['Fee']:
-                final_result = result
-            elif result['Hold'] > final_result['Hold']:
-                final_result = result
+                final_result['Registrar Hold'] = True
+            if result['Fee'] and not final_result['Fee']:
+                final_result['Fee'] = True
+            # consecutive placement of hold lengths
+            final_result['Hold'] += result['Hold']
 
         return final_result, alloc_end_time, allocation['checkoutCenter']
 
@@ -429,6 +424,7 @@ class Repercussions:
             'Registrar Hold': False
         }
         self.upper_limits = (0, 1, 10, 20)
+        # checks which section of "length of overdue" patron is in - Actual hold length comes from self.resource_type_consequence_mapping with a type
         self.overdue_length = self._ceil(overdue_length)
         self.alloc_types = alloc_types
 
@@ -459,7 +455,7 @@ class Repercussions:
         buckets = self._get_buckets()
 
         for bucket in buckets:
-            self.final_consequences['Hold'] = max(self.final_consequences['Hold'], self._get(bucket)['Hold'])
+            self.final_consequences['Hold'] += self._get(bucket)['Hold'] # items apply holds consecutively
             self.final_consequences['Fee'] = True if self._get(bucket)['Fee'] or self.final_consequences['Fee'] else False
             self.final_consequences['Registrar Hold'] = True if self._get(bucket)['Registrar Hold'] or self.final_consequences['Registrar Hold'] else False
         

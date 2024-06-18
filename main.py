@@ -47,10 +47,7 @@ wco_host = ''
 wco_userid = ''
 wco_password = ''
 redmine_host = ''
-redmine_session_cookie = ''
 redmine_auth_key = ''
-shibsession_cookie_name = ''
-shibsession_cookie_value = ''
 project_query_ext = ''
 postgres_pass = ''
 
@@ -65,12 +62,6 @@ try:
                 wco_password = line.split("=", maxsplit=1)[1].strip()
             elif "redmine_host" in line.lower():
                 redmine_host = line.split("=", maxsplit=1)[1].strip()
-            elif "redmine_session_cookie" in line.lower():
-                redmine_session_cookie = line.split("=", maxsplit=1)[1].strip()
-            elif "shibsession_cookie_name" in line.lower():
-                shibsession_cookie_name = line.split("=", maxsplit=1)[1].strip()
-            elif "shibsession_cookie_value" in line.lower():
-                shibsession_cookie_value = line.split("=", maxsplit=1)[1].strip()
             elif "redmine_auth_key" in line.lower():
                 redmine_auth_key = line.split("=", maxsplit=1)[1].strip()
             elif "project_query_ext" in line.lower():
@@ -83,9 +74,6 @@ except OSError as e:  # file not found or permission error
         wco_userid = input("WebCheckout user id: ")
         wco_password = input("WebCheckout Password: ")
         redmine_host = input("Redmine host: ")
-        redmine_session_cookie = input("redmine_session_cookie: ")
-        shibsession_cookie_name = input("_shibsession cookie name: ")
-        shibsession_cookie_value = input("_shibsession cookie value: ")
 
 finally:
     if not wco_host:
@@ -167,26 +155,28 @@ try:
 
         print("\n".join(ss_results_list))
     
+    # depricated
     if args.redmine_update:
-        print("Performing redmine update...\n")
+        pass # depricated - to remove/rework
+        # print("Performing redmine update...\n")
 
-        if not redmine_host:
-            redmine_host = input("redmine host: ")
-        if not shibsession_cookie_name:
-            wco_userid = input("shibsession cookie name: ")
-        if not shibsession_cookie_value:
-            wco_password = input("shibsession cookie value: ")
-        if not redmine_session_cookie:
-            redmine_host = input("redmine session cookie: ")
-        if not redmine_auth_key:
-            wco_userid = input("redmine auth key: ")
-        if not project_query_ext:
-            project_query_ext = input("project query ext: ")
+        # if not redmine_host:
+        #     redmine_host = input("redmine host: ")
+        # if not shibsession_cookie_name:
+        #     wco_userid = input("shibsession cookie name: ")
+        # if not shibsession_cookie_value:
+        #     wco_password = input("shibsession cookie value: ")
+        # if not redmine_session_cookie:
+        #     redmine_host = input("redmine session cookie: ")
+        # if not redmine_auth_key:
+        #     wco_userid = input("redmine auth key: ")
+        # if not project_query_ext:
+        #     project_query_ext = input("project query ext: ")
 
-        rm_connection = RedmineConnection(wco_connection, redmine_host, shibsession_cookie_name, shibsession_cookie_value, redmine_session_cookie, redmine_auth_key)
+        # rm_connection = RedmineConnection(wco_connection, redmine_host, shibsession_cookie_name, shibsession_cookie_value, redmine_session_cookie, redmine_auth_key)
 
-        rm_connection.process_working_overdues(project_query_ext=project_query_ext)
-        rm_connection.process_new_overdues(start=args.redmine_update[0], end=args.redmine_update[1], centers=args.redmine_update[2:])
+        # rm_connection.process_working_overdues(project_query_ext=project_query_ext)
+        # rm_connection.process_new_overdues(start=args.redmine_update[0], end=args.redmine_update[1], centers=args.redmine_update[2:])
     
     if args.checkout_emails:
         print(f"Getting emails for open checkouts from {args.checkout_emails[0]} to {args.checkout_emails[1]} at center: {args.checkout_emails[2]}...\n")
@@ -197,17 +187,21 @@ try:
     
     if args.process_overdues:
         overdues_correct_date_range = ''
-        texting = Texting(wco_connection, redmine_host, shibsession_cookie_name, shibsession_cookie_value, redmine_session_cookie, redmine_auth_key)
-        oconn = Overdues(wco_connection, utils(wco_connection), texting, postgres_pass)
+        texting = Texting(wco_connection, redmine_host, redmine_auth_key)
+        redmine_conn = RedmineConnection(wco_connection, redmine_host, redmine_auth_key)
+        oconn = Overdues(wco_connection, utils(wco_connection), redmine_conn, texting, postgres_pass)
+        # oconn.check_waived_invoices()
         while overdues_correct_date_range.lower()[:1] != 'y':
             overdues_start = input("Overdues Start Date (mm/dd/yyyy): ")
             overdues_start_dt = datetime.strptime(overdues_start, '%m/%d/%Y') if '/' in overdues_start else oconn.last_run()
             overdues_end = input("Overdues End Date: ")
             overdues_end_dt = datetime.strptime(overdues_end, '%m/%d/%Y') if '/' in overdues_end else datetime.now()
             overdues_start_end_diff = overdues_end_dt - overdues_start_dt
-            overdues_correct_date_range = input(f"Start Date of {overdues_start} is {overdues_start_end_diff.days} days, {overdues_start_end_diff.seconds // 3600} hours from end time of {overdues_end}. Is this correct? [y/n]: ")
+            overdues_correct_date_range = input(f"Start Date of {overdues_start_dt.isoformat(sep=' ', timespec='seconds')} is " \
+                                                f"{overdues_start_end_diff.days} days, {overdues_start_end_diff.seconds // 3600} hours from end time of " \
+                                                f"{overdues_end_dt.isoformat(sep=' ', timespec='seconds')}. Is this correct? [y/n]: ")
         
-        print(f"Processing overdues with start date {overdues_start}, end date {overdues_end if overdues_end else 'Now'}...")
+        print(f"Processing overdues with start date {overdues_start_dt.isoformat(sep=' ', timespec='seconds')}, end date {overdues_start_dt.isoformat(sep=' ', timespec='seconds')}...")
 
         oconn.excluded_allocations(input("Excluded allocations (whitespace seperation): "))
         oconn.update(overdues_start_dt, overdues_end_dt)
