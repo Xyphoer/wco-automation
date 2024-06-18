@@ -661,78 +661,82 @@ class Overdues:
         year_now = datetime.now().year
         prev_lost = self.db.all(f"SELECT invoice_oid, ck_oid FROM invoices WHERE overdue_lost AND overdue_start_time < CAST('01-01-{year_now}' AS TIMESTAMP)")
 
-        # need safety for if folder doesn't exist, and to make it
-        with open(f"../Lost Logs/Lost Items {datetime.now().isoformat(timespec='seconds').replace(':','_')}.csv", 'w') as csv:
-            csv.write('item oid, item name, item serial number, item barcode, item type path, item creation date, checkout id, patron name, patron wiscard, patron status\n')
-            
-            for lost_ck in prev_lost:
-                invoice_oid, allocation_oid = lost_ck[0], lost_ck[1]
-                alloc = self.connection.get_allocation(allocation_oid, ['uniqueId', 'scheduledEndTime', 'checkoutCenter',
-                    {'property': 'patron',
-                        'subProperties': ['name', 'barcode', 'status']},
-                    {'property': 'items',
-                        'subProperties': ['name',
-                                            {'property': 'resource',
-                                                'subProperties': ['serialNumber', 'creationDate', 'resourceTypePath', 'barcode']
-                                            }
-                                        ]
-                    }]).json()
-                for item in alloc['payload']['items']:
-                    csv.write(', '.join([str(item['resource']['oid']),
-                                        item['name'],
-                                        str(item['resource']['serialNumber']),
-                                        item['resource']['barcode'],
-                                        ''.join(item['resource']['resourceTypePath']),
-                                        datetime.strptime(item['resource']['creationDate'], '%Y-%m-%dT%H:%M:%S.%f%z').isoformat(sep=' ', timespec='seconds'),
-                                        alloc['payload']['uniqueId'],
-                                        alloc['payload']['patron']['name'],
-                                        alloc['payload']['patron']['barcode'],
-                                        alloc['payload']['patron']['status']]) + '\n')
-
-            for lost_ck in lost_overdues:
-                invoice_oid, allocation_oid = lost_ck[0], lost_ck[1]
-
-                #stopgap - cleanup
-                if invoice_oid == -1:
-                    continue # should actually delete references -- add later
-
-                alloc = self.connection.get_allocation(allocation_oid, ['uniqueId', 'scheduledEndTime', 'checkoutCenter',
-                    {'property': 'patron',
-                        'subProperties': ['name', 'barcode', 'status']},
-                    {'property': 'items',
-                        'subProperties': ['name',
-                                            {'property': 'resource',
-                                                'subProperties': ['serialNumber', 'creationDate', 'resourceTypePath', 'barcode']
-                                            }
-                                        ]
-                    }]).json()
+        # only make file if new lost overdues
+        if lost_overdues:
+            # need safety for if folder doesn't exist, and to make it
+            file_name_time = datetime.now().isoformat(timespec='seconds').replace(':','_')
+            with open(f"../Lost Logs/Lost Items {file_name_time}.csv", 'w') as csv:
+                csv.write('item oid, item name, item serial number, item barcode, item type path, item creation date, checkout id, patron name, patron wiscard, patron status\n')
                 
-                self.connection.set_scope(alloc['payload']['checkoutCenter']['oid'], 'checkoutCenter')
-                self.connection.return_allocation(alloc['payload'])
+                for lost_ck in prev_lost:
+                    invoice_oid, allocation_oid = lost_ck[0], lost_ck[1]
+                    alloc = self.connection.get_allocation(allocation_oid, ['uniqueId', 'scheduledEndTime', 'checkoutCenter',
+                        {'property': 'patron',
+                            'subProperties': ['name', 'barcode', 'status']},
+                        {'property': 'items',
+                            'subProperties': ['name',
+                                                {'property': 'resource',
+                                                    'subProperties': ['serialNumber', 'creationDate', 'resourceTypePath', 'barcode']
+                                                }
+                                            ]
+                        }]).json()
+                    for item in alloc['payload']['items']:
+                        csv.write(', '.join([str(item['resource']['oid']),
+                                            item['name'],
+                                            str(item['resource']['serialNumber']),
+                                            item['resource']['barcode'],
+                                            ''.join(item['resource']['resourceTypePath']),
+                                            datetime.strptime(item['resource']['creationDate'], '%Y-%m-%dT%H:%M:%S.%f%z').isoformat(sep=' ', timespec='seconds'),
+                                            alloc['payload']['uniqueId'],
+                                            alloc['payload']['patron']['name'],
+                                            alloc['payload']['patron']['barcode'],
+                                            alloc['payload']['patron']['status']]) + '\n')
 
-                for item in alloc['payload']['items']:
-                    rem = self.connection.delete_resource(item['resource']['oid'])
-                    if type(rem) == str:
-                        print(alloc['payload']['oid'], rem)
+                for lost_ck in lost_overdues:
+                    invoice_oid, allocation_oid = lost_ck[0], lost_ck[1]
 
-                    csv.write(', '.join([str(item['resource']['oid']),
-                                        item['name'],
-                                        str(item['resource']['serialNumber']),
-                                        item['resource']['barcode'],
-                                        ''.join(item['resource']['resourceTypePath']),
-                                        datetime.strptime(item['resource']['creationDate'], '%Y-%m-%dT%H:%M:%S.%f%z').isoformat(sep=' ', timespec='seconds'),
-                                        alloc['payload']['uniqueId'],
-                                        alloc['payload']['patron']['name'],
-                                        alloc['payload']['patron']['barcode'],
-                                        alloc['payload']['patron']['status']]) + '\n')
+                    #stopgap - cleanup
+                    if invoice_oid == -1:
+                        continue # should actually delete references -- add later
 
-                self.db.run("UPDATE invoices SET overdue_lost = True WHERE ck_oid = %(ck_oid)s", ck_oid = allocation_oid)
+                    alloc = self.connection.get_allocation(allocation_oid, ['uniqueId', 'scheduledEndTime', 'checkoutCenter',
+                        {'property': 'patron',
+                            'subProperties': ['name', 'barcode', 'status']},
+                        {'property': 'items',
+                            'subProperties': ['name',
+                                                {'property': 'resource',
+                                                    'subProperties': ['serialNumber', 'creationDate', 'resourceTypePath', 'barcode']
+                                                }
+                                            ]
+                        }]).json()
+                    
+                    self.connection.set_scope(alloc['payload']['checkoutCenter']['oid'], 'checkoutCenter')
+                    self.connection.return_allocation(alloc['payload'])
 
-                canned = CannedMessages(invoice_oid, self.connection, self.db).get_lost()
-                canned_subject, canned_description = canned['subject'], canned['description']
-                person = self.connection.get_patron(alloc['payload']['patron']['oid'], ['email', 'firstName', 'lastName', 'name', 'barcode']).json()['payload']
-                ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], '', self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
-                self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], canned_description)
+                    for item in alloc['payload']['items']:
+                        rem = self.connection.delete_resource(item['resource']['oid'])
+                        if type(rem) == str:
+                            print(alloc['payload']['oid'], rem)
+
+                        csv.write(', '.join([str(item['resource']['oid']),
+                                            item['name'],
+                                            str(item['resource']['serialNumber']),
+                                            item['resource']['barcode'],
+                                            ''.join(item['resource']['resourceTypePath']),
+                                            datetime.strptime(item['resource']['creationDate'], '%Y-%m-%dT%H:%M:%S.%f%z').isoformat(sep=' ', timespec='seconds'),
+                                            alloc['payload']['uniqueId'],
+                                            alloc['payload']['patron']['name'],
+                                            alloc['payload']['patron']['barcode'],
+                                            alloc['payload']['patron']['status']]) + '\n')
+
+                    self.db.run("UPDATE invoices SET overdue_lost = True WHERE ck_oid = %(ck_oid)s", ck_oid = allocation_oid)
+
+                    canned = CannedMessages(invoice_oid, self.connection, self.db).get_lost()
+                    canned_subject, canned_description = canned['subject'], canned['description']
+                    person = self.connection.get_patron(alloc['payload']['patron']['oid'], ['email', 'firstName', 'lastName', 'name', 'barcode']).json()['payload']
+                    ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], '', self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+                    self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], canned_description)
+            print("Lost csv record created at: ", f"../Lost Logs/Lost Items {file_name_time}.csv")
         
         # maybe do resources instead of full checkouts?
         allocations = input("Lost Returned allocations (whitespace seperation): ")
