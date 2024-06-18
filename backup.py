@@ -12,5 +12,5 @@ if response != 0: # is not running == 3
         raise OSError('Failed to connected to database at "C:/Program Files/PostgreSQL/16/data"')
 
 if response == 0 or start == 0:
-    backup = system('pg_dump -U postgres > "C:/Users/Public/Downloads/postgres_overdues_db_%DATE:~7,2%-%DATE:~4,2%-%DATE:~10,4%_%TIME:~0,2%_%TIME:~3,2%_%TIME:~6,2%.sql"')
+    backup = system('pg_dump -U postgres > "C:/Users/Public/Downloads/backups/postgres_overdues_db_%DATE:~7,2%-%DATE:~4,2%-%DATE:~10,4%_%TIME:~0,2%_%TIME:~3,2%_%TIME:~6,2%.sql"')
     system('timeout 10')
