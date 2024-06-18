@@ -209,11 +209,6 @@ class Overdues:
         current_registrar_holds = self.db.all('SELECT ck_oid FROM invoices WHERE registrar_hold AND NOT waived')
         excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations')
 
-        # rudamentary blocking of multiple holds on one person for multiple checkouts going overdue at once
-        # Note: will process each fine individually (i.e. add 1 for each and email twice), same w/ texting
-        # --temporarily acceptible
-        already_processed = {}
-
         for allocation in response.json()['payload']['result']:
             center = allocation['checkoutCenter']
             patron_oid = allocation['patron']['oid']
@@ -249,14 +244,11 @@ class Overdues:
                         ######
                         invoice = self.place_hold(patron_oid, center, allocation, overdue_time=scheduled_end)
                         invoice_oid = invoice['oid']
-                        already_processed[patron_oid] = invoice_oid
-                    else:
-                        invoice_oid = already_processed[patron_oid]
 
-                    try:
-                        self.texting.add_checkout(allocation['checkoutCenter']['name'], allocation)
-                    except Exception as e:
-                        print("Error adding checkout to texting:", e)
+                        try:
+                            self.texting.add_checkout(allocation['checkoutCenter']['name'], allocation)
+                        except Exception as e:
+                            print("Error adding checkout to texting:", e)
 
                     else:
                         invoice_oids = self.db.all('SELECT invoice_oid FROM invoices WHERE ck_oid=%(id)s AND NOT waived', id=allocation['oid'])
@@ -268,10 +260,10 @@ class Overdues:
                             charge = allocation['aggregateValueOut'] if allocation['aggregateValueOut'] else 2000 # value of checked out items only
                             fee_placed = self.place_fee(invoice_oid, charge)
 
-                        try:
-                            self.texting.add_checkout(allocation['checkoutCenter']['name'], allocation)
-                        except Exception as e:
-                            print("Error adding checkout to texting:", e)
+                            try:
+                                self.texting.add_checkout(allocation['checkoutCenter']['name'], allocation)
+                            except Exception as e:
+                                print("Error adding checkout to texting:", e)
 
                             if not fee_placed:
                                 print(f"No fee placed on person with oid:{patron_oid}")
