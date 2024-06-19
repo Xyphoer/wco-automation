@@ -658,8 +658,36 @@ class Overdues:
     
     def _process_lost(self):
         lost_overdues = self.db.all("SELECT invoice_oid, ck_oid FROM invoices WHERE overdue_start_time < ('NOW'::TIMESTAMP - '6Months'::INTERVAL) AND NOT overdue_lost AND NOT waived AND hold_remove_time IS NULL")
-        year_now = datetime.now().year
+        now = datetime.now()
+        year_now = now.year
         prev_lost = self.db.all(f"SELECT invoice_oid, ck_oid FROM invoices WHERE overdue_lost AND overdue_start_time < CAST('01-01-{year_now}' AS TIMESTAMP)")
+
+        # read emails to contact for location specific lost items
+        with open('config.txt', 'r') as config:
+            for line in config:
+                if "ebling_contact" in line.lower():
+                    ebling_contact = line.split("=", maxsplit=1)[1].strip().split()
+                elif "merit_contact" in line.lower():
+                    merit_contact = line.split("=", maxsplit=1)[1].strip().split()
+                elif "steenbock_contact" in line.lower():
+                    steenbock_contact = line.split("=", maxsplit=1)[1].strip().split()
+                elif "business_contact" in line.lower():
+                    business_contact = line.split("=", maxsplit=1)[1].strip().split()
+                elif "social_work_contact" in line.lower():
+                    social_work_contact = line.split("=", maxsplit=1)[1].strip().split()
+                elif "college_memorial_contact" in line.lower():
+                    college_memorial_contact = line.split("=", maxsplit=1)[1].strip().split()
+
+        # list containing the contact emails and email content for each location  
+        location_emails = {
+            "college_memorial": [college_memorial_contact,
+                        {'subject': f'College/Memorial Library InfoLab - Lost Item Report from 01-01-{year_now} to {now.isoformat(sep=' ', timespec='seconds')}', 'description': ''}],
+            "business": [business_contact, {'subject': '', 'description': ''}],
+            "ebling": [ebling_contact, {'subject': '', 'description': ''}],
+            "socialwork": [social_work_contact, {'subject': '', 'description': ''}],
+            "steenbock": [steenbock_contact, {'subject': '', 'description': ''}],
+            "merit": [merit_contact, {'subject': '', 'description': ''}],
+        }
 
         # only make file if new lost overdues
         if lost_overdues:
