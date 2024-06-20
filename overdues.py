@@ -705,7 +705,7 @@ class Overdues:
             # need safety for if folder doesn't exist, and to make it
             file_name_time = datetime.now().isoformat(timespec='seconds').replace(':','_')
             with open(f"../Lost Logs/Lost Items {file_name_time}.csv", 'w') as csv:
-                csv_header = 'item oid, item name, item serial number, item barcode, item type path, item creation date, checkout id, patron name, patron wiscard, patron status\n'
+                csv_header = 'item oid, item name, item serial number, item barcode, item type path, item creation date, checkout id, patron name, patron wiscard, patron status, location\n'
                 csv.write(csv_header)
                 
                 for lost_ck in prev_lost:
@@ -730,7 +730,8 @@ class Overdues:
                                             alloc['payload']['uniqueId'],
                                             alloc['payload']['patron']['name'],
                                             alloc['payload']['patron']['barcode'],
-                                            alloc['payload']['patron']['status']]) + '\n'
+                                            alloc['payload']['patron']['status'],
+                                            alloc['payload']['checkoutCenter']['name']]) + '\n'
                         csv.write(item_text)
 
                         center = ' '.join(alloc['payload']['checkoutCenter']['name'].lower().split()[:-1])
@@ -774,7 +775,8 @@ class Overdues:
                                             alloc['payload']['uniqueId'],
                                             alloc['payload']['patron']['name'],
                                             alloc['payload']['patron']['barcode'],
-                                            alloc['payload']['patron']['status']]) + '\n'
+                                            alloc['payload']['patron']['status'],
+                                            alloc['payload']['checkoutCenter']['name']]) + '\n'
                         csv.write(item_text)
 
                         center = ' '.join(alloc['payload']['checkoutCenter']['name'].lower().split()[:-1])
