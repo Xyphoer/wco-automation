@@ -307,6 +307,21 @@ class RedmineConnection:
                                             "status_id": status_id,
                                             "content": content
                                  }})
+    
+    def search_phone(self, patron_name: str, patron_email = ''):
+        response = requests.get(f'https://api.www.wisc.cloud/directory/wisc-ldap-lookup?name={patron_name}')
+        result = response.json()['records']
+        phone_number = None
+        # only get phone number if a perfect match (i.e. only one person with that name, or if multiple people, a perfect match on the phone number)
+        if result:
+            if len(result) == 1:
+                phone_number = result[0]['phones'][0]
+            elif patron_email:
+                for entry in result:
+                    for email in result['emails']:
+                        if email.lower() == patron_email.lower():
+                            phone_number = entry['phones'][0]
+        return phone_number
 
 class Texting(RedmineConnection):
 
