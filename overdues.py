@@ -298,7 +298,7 @@ class Overdues:
     # get all returned overdues and resolve hold end date, fine, or fully create if needed. -- NOTE: Need fine implement & alloc with diff return times handler
     # on new - by checkout - process
     # possibly set an invoice due date with: self.connection.update_invoice(invoice_oid, {"dueDate": None}).json() ?
-    def _process_returned_overdues(self, start_search_time: datetime, end_search_time: datetime): #  -> dict
+    def _process_returned_overdues(self, start_search_time: datetime, end_search_time: datetime, specific_checkouts = None): #  -> dict
         # update db with new overdue items for patrons (Note: only count if the checkout is completed)
         # update step: returns dictionary of changes
         insert_dict = {}
@@ -309,10 +309,10 @@ class Overdues:
         excluded_checkouts = self.db.all('SELECT allocation_oid FROM excluded_allocations')
         excluded_checkouts.extend(self.db.all('SELECT ck_oid FROM invoices WHERE overdue_lost'))
 
-        # if not specific_checkouts:
-        allocations = self.connection.get_completed_overdue_allocations(start_search_time, end_search_time).json()['payload']['result']
-        # else:
-        #     allocations = specific_checkouts
+        if not specific_checkouts:
+            allocations = self.connection.get_completed_overdue_allocations(start_search_time, end_search_time).json()['payload']['result']
+        else:
+            allocations = specific_checkouts
 
         for allocation in allocations:
             if allocation['oid'] not in excluded_checkouts:
@@ -532,7 +532,8 @@ class Overdues:
                 print(key, value, invoice_oid)
                 print(e)
             
-        self.db.run(f"INSERT INTO history (time_ran) VALUES ('{end_search_time.isoformat()}')") # should isolate to own function running at end
+        if not specific_checkouts:
+            self.db.run(f"INSERT INTO history (time_ran) VALUES ('{end_search_time.isoformat()}')") # should isolate to own function running at end
         
         return
 
@@ -935,7 +936,7 @@ class Overdues:
             self.db.run("UPDATE overdues SET hold_count = hold_count - %(hold_amount)s, " \
                             "fee_count = fee_count - %(fee_amount)s, " \
                             "registrar_hold_count = registrar_hold_count - %(reg_hold)s, " \
-                            "hold_length = hold_length - CAST('%(hold_len)s' AS INTERVAL), "
+                            "hold_length = hold_length - CAST(%(hold_len)s AS INTERVAL), "
                             "invoice_oids = invoice_oids - '{%(i_id)s}'::integer[]"
                         "WHERE patron_oid = %(p_id)s",
                             hold_amount = int(prev_status[0]),
