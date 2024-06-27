@@ -1,6 +1,7 @@
 from connection import Connection
 from redmine import Texting, RedmineConnection, CannedMessages
 from postgres import Postgres
+from postgres.cursors import TooMany
 from datetime import datetime, timedelta, timezone
 from utils import utils, Repercussions
 from os import system, chdir
@@ -402,7 +403,12 @@ class Overdues:
                         invoice_oid = invoice['oid']
 
                 else:
-                    invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid = %(a_id)s', a_id = value[6]['oid'])
+                    try:
+                        invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid = %(a_id)s', a_id = value[6]['oid'])
+                    except TooMany as e:
+                        # temporary fix for conversion from old db using existing checkouts
+                        self.db.run('UPDATE invoices SET ck_oid = -ck_oid WHERE ck_oid = %(a_id)s AND waived', a_id = value[6]['oid'])
+                        invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid = %(a_id)s', a_id = value[6]['oid'])
                     invoice = self.connection.get_invoice(invoice_oid).json()['payload']
 
                 if invoice_oid:
