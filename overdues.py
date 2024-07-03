@@ -953,7 +953,7 @@ class Overdues:
                             p_id = p_oid) # convert previous hold/fee/registrar status to 1/0 for updating overdues
         
         if un_processed_allocs:
-            self.db.run("UPDATE excluded_allocations SET processed = %(proc_date)s WHERE allocation_oid IN ANY(%(a_id)s)",
+            self.db.run("UPDATE excluded_allocations SET processed = %(proc_date)s WHERE allocation_oid=ANY(%(a_id)s)",
                         proc_date = datetime.now(), a_id = un_processed_allocs)
 
     def _process_expirations(self):
