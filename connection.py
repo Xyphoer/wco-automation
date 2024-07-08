@@ -203,6 +203,18 @@ class Connection:
                                             headers = {"Authorization": "Bearer " + self.session_token},
                                             json = {"oid": resource_oid})
     
+    def get_allocations(self, query: dict, properties = []):
+        if properties:
+            return self.request_session.post(url = self.host + "/rest/allocation/search",
+                                            headers = {"Authorization": "Bearer " + self.session_token},
+                                            json = {"query": query,
+                                                    "properties": properties})
+        
+        else:
+            return self.request_session.post(url = self.host + "/rest/allocation/search",
+                                            headers = {"Authorization": "Bearer " + self.session_token},
+                                            json = {"query": query})
+
     def get_allocation(self, allocation_oid: int, properties = []):
         if properties:
             return self.request_session.post(url = self.host + "/rest/allocation/get",

@@ -319,7 +319,7 @@ class utils:
 
         return final_result, alloc_end_time, allocation['checkoutCenter']
 
-    def get_checkout_emails(self, center, start_time, end_time):
+    def get_overdue_checkout_emails(self, center, start_time, end_time):
         emails = []
         
         checkouts = self.connection.get_new_overdues(center.lower()).json()['payload']['result']
@@ -334,6 +334,12 @@ class utils:
                 emails.append(checkout['patronPreferredEmail'])
         
         print(', '.join(emails))
+    
+    # def get_checkout_emails(self, center, start_time):
+    #     emails = []
+    #     earliest_actual_start = start_time.isoformat()
+
+    #     checkouts = self.connection.get_allocations(query={"earliestActualStart": earliest_actual_start}, properties=)
 
 class Repercussions:
 

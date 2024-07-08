@@ -175,7 +175,7 @@ try:
 
         utils = utils(wco_connection)
 
-        utils.get_checkout_emails(start_time=args.checkout_emails[0], end_time=args.checkout_emails[1], center=args.checkout_emails[2])
+        utils.get_overdue_checkout_emails(start_time=args.checkout_emails[0], end_time=args.checkout_emails[1], center=args.checkout_emails[2])
     
     if args.process_overdues:
         overdues_correct_date_range = ''
