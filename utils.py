@@ -335,11 +335,22 @@ class utils:
         
         print(', '.join(emails))
     
-    # def get_checkout_emails(self, center, start_time):
-    #     emails = []
-    #     earliest_actual_start = start_time.isoformat()
+    def get_checkout_emails(self, start_time: datetime):
+        emails = {}
+        alloc_types = []
+        earliest_actual_start = start_time.isoformat()
 
-    #     checkouts = self.connection.get_allocations(query={"earliestActualStart": earliest_actual_start}, properties=)
+        checkouts = self.connection.get_allocations(query={"earliestActualStart": earliest_actual_start}, properties=['patronEmail', 'items', 'patron']).json()['payload']['result']
+        
+        for checkout in checkouts:
+            alloc_types = [alloc_type['rtype']['path'] for alloc_type in checkout['items'] if 'accessories' not in alloc_type['rtype']['path'].lower()]
+            if checkout['patronEmail'] not in emails and alloc_types != []:
+                emails[checkout['patronEmail']] = [checkout['patron']['name'], alloc_types]
+            elif alloc_types != []:
+                emails[checkout['patronEmail']][1].extend(alloc_types)
+            alloc_types = []
+        
+        return emails
 
 class Repercussions:
 
