@@ -357,10 +357,14 @@ class Texting(RedmineConnection):
                         phone_number = "+1" + "".join(re.findall(r'\d+', checkout['note']))
                         phone_numbers.append(phone_number[0:12] if len(phone_number) > 12 else phone_number)
                     else:
-                        phone_number = "+1" + "".join(re.findall(r'\d+', input(f"Phone Number for {checkout['uniqueId']} - {checkout['patron']['name']}: ")))
+                        phone_number = "+1" + "".join(re.findall(r'\d+', self.search_phone(checkout['patron']['name'], checkout['patronPreferredEmail'])))
+
+                        if not phone_number:
+                            print(f"Could not find phone number for {checkout['uniqueId']} - {checkout['patron']['name']} | skipping text.")
+                            # move to next checkout
+                            continue
+                            
                         phone_numbers.append(phone_number[0:12] if len(phone_number) > 12 else phone_number)
-                        if phone_number == '+1':
-                            phone_numbers.append(f"{checkout['uniqueId']} - {checkout['patron']['name']} - No phone number found")
 
                     # check for open tickets
                     existing_ticket = self.session.get(url = self.host + f"/search.json?q={checkout['uniqueId']}&scope=my_project").json()
