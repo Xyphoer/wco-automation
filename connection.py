@@ -1,5 +1,6 @@
 import requests
 from datetime import datetime, timedelta
+from utils.Decorations import check_wco_request
 
 #####
 # Name: Connection
@@ -47,6 +48,7 @@ class Connection:
     # Output: Session information
     # Description: Starts the session with WCO by signing in with the provided credentials.
     #####
+    @check_wco_request
     def start_session(self):
         response = self.request_session.post(url = self.host + "/rest/session/start",
                         headers = {"Authorization": "Bearer Requested"},
@@ -60,6 +62,7 @@ class Connection:
     # Output: Scope information
     # Description: Sets the scope of the session to College Library
     #####
+    @check_wco_request
     def set_scope(self, location_oid: int, _class: str = "organization"):
         return self.request_session.post(url = self.host + "/rest/session/setSessionScope",
                       headers = {"Authorization": "Bearer " + self.session_token},
@@ -93,6 +96,7 @@ class Connection:
 
         return sorted_allocs
 
+    @check_wco_request
     def get_patron_checkouts(self, patron_oid: int, properties = []):
         patron = self.get_patron(patron_oid).json()['payload']
         if properties:
@@ -150,6 +154,7 @@ class Connection:
     # Output: checkout information
     # Description: Gets a specific checkout by it's unique CK-#### id
     #####
+    @check_wco_request
     def get_checkout(self, id: str):
         return self.request_session.post(url = self.host + "/rest/allocation/search",
                              headers = {"Authorization": "Bearer " + self.session_token},
@@ -175,6 +180,7 @@ class Connection:
     # Output: Patron information
     # Description: Get patron information using their oid
     #####
+    @check_wco_request
     def get_patron(self, patron_oid: int, properties = []):
         if properties:
             return self.request_session.post(url = self.host + "/rest/person/get",
@@ -186,12 +192,14 @@ class Connection:
                                 headers = {"Authorization": "Bearer " + self.session_token},
                                 json = {"oid": patron_oid})
     
+    @check_wco_request
     def get_account(self, patron_oid: int):
         return self.request_session.post(url = self.host + "/rest/person/get",
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"oid": patron_oid,
                                     "properties": ["defaultAccount"]})
     
+    @check_wco_request
     def get_resource(self, resource_oid: int, properties = []):
         if properties:
             return self.request_session.post(url = self.host + "/rest/resource/get",
@@ -203,6 +211,7 @@ class Connection:
                                             headers = {"Authorization": "Bearer " + self.session_token},
                                             json = {"oid": resource_oid})
     
+    @check_wco_request
     def get_allocations(self, query: dict, properties = []):
         if properties:
             return self.request_session.post(url = self.host + "/rest/allocation/search",
@@ -215,6 +224,7 @@ class Connection:
                                             headers = {"Authorization": "Bearer " + self.session_token},
                                             json = {"query": query})
 
+    @check_wco_request
     def get_allocation(self, allocation_oid: int, properties = []):
         if properties:
             return self.request_session.post(url = self.host + "/rest/allocation/get",
@@ -226,6 +236,7 @@ class Connection:
                                             headers = {"Authorization": "Bearer " + self.session_token},
                                             json = {"oid": allocation_oid})
     
+    @check_wco_request
     def return_allocation(self, allocation):
         return self.request_session.post(url = self.host + "/rest/allocation/returnAllocation",
                                          headers = {"Authorization": "Bearer " + self.session_token},
@@ -246,12 +257,14 @@ class Connection:
                                              json = {"oid": resource_oid,
                                                      "values": {"deleted": True}})
     
+    @check_wco_request
     def undelete_resource(self, resource_oid: int):
         return self.request_session.post(url = self.host + "/rest/resource/update",
                                             headers = {"Authorization": "Bearer " + self.session_token},
                                             json = {"oid": resource_oid,
                                                     "values": {"deleted": False}})
     
+    @check_wco_request
     def get_completed_overdue_allocations(self, start_time: datetime, end_time: datetime):
         earliest_actual_end = start_time.isoformat()
         latest_scheduled_end = (start_time - timedelta(minutes=10)).isoformat()  # 10 minute grace period
@@ -263,6 +276,7 @@ class Connection:
                                      "properties": ["oid", "patron", "items", "scheduledEndTime", "realEndTime", "checkoutCenter"]})
     
     # get current overdues
+    @check_wco_request
     def get_current_overdue_allocations(self):
         latest_scheduled_end = (datetime.now() - timedelta(minutes=10)).isoformat()  # 10 minute grace period
 
@@ -277,6 +291,7 @@ class Connection:
     # Output: Invoice information
     # Description: Get invoice information and the corresponding patrons
     #####
+    @check_wco_request
     def get_open_invoices(self):
         return self.request_session.post(url = self.host + "/rest/invoice/search",
                              headers = {"Authorization": "Bearer " + self.session_token},
@@ -284,12 +299,14 @@ class Connection:
                                      "properties": ["invoiceBalance",
                                                     "person"]})
     
+    @check_wco_request
     def find_invoices(self, query: dict, properties: list = []):
         return self.request_session.post(url = self.host + "/rest/invoice/search",
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"query": query,
                                      "properties": properties})
     
+    @check_wco_request
     def get_invoice(self, invoice_oid: int, properties = []):
         if properties:
             return self.request_session.post(url = self.host + "/rest/invoice/get",
@@ -301,11 +318,13 @@ class Connection:
                                 headers = {"Authorization": "Bearer " + self.session_token},
                                 json = {"oid": invoice_oid})
     
+    @check_wco_request
     def get_invoice_lines(self, invoice):
         return self.request_session.post(url = self.host + "/rest/invoiceLine/search",
                                 headers = {"Authorization": "Bearer " + self.session_token},
                                 json = {"query": {"invoice": invoice}})
     
+    @check_wco_request
     def strike_invoice_line(self, invoice, line, comment = ""):
         return self.request_session.post(url = self.host + "/rest/invoice/strikeInvoiceLine",
                                 headers = {"Authorization": "Bearer " + self.session_token},
@@ -313,6 +332,7 @@ class Connection:
                                         "line": line,
                                         "comment": comment})
     
+    @check_wco_request
     def unstrike_invoice_line(self, invoice, line, comment = ""):
         return self.request_session.post(url = self.host + "/rest/invoice/unstrikeInvoiceLine",
                                 headers = {"Authorization": "Bearer " + self.session_token},
@@ -327,6 +347,7 @@ class Connection:
     # Description: Create an invoice for said account, under said organization (should always be LTG),
     #              in said checkout center.
     #####
+    @check_wco_request
     def create_invoice(self, account, organization, center, allocation=None, description=''):
         return self.request_session.post(url = self.host + "/rest/invoice/new",
                             headers = {"Authorization": "Bearer " + self.session_token},
@@ -336,12 +357,14 @@ class Connection:
                                     "checkoutCenter": center,
                                     "description": description})
     
+    @check_wco_request
     def update_invoice(self, invoice_oid: int, update_dict: dict):
         return self.request_session.post(url = self.host + "/rest/invoice/update",
                                          headers = {"Authorization": "Bearer " + self.session_token},
                                          json = {'oid': invoice_oid,
                                                  'values': update_dict})
     
+    @check_wco_request
     def waive_invoice(self, invoice, comment: str = '') -> requests.Response:
         return self.request_session.post(url = self.host + "/rest/invoice/waiveInvoices",
                             headers = {"Authorization": "Bearer " + self.session_token},
@@ -352,12 +375,14 @@ class Connection:
         #                     json = {"invoice": invoice,
         #                             "comment": comment})
 
+    @check_wco_request
     def apply_invoice_hold(self, invoice, comment: str = ''):
         return self.request_session.post(url = self.host + "/rest/invoice/applyHold",
                              headers = {"Authorization": "Bearer " + self.session_token},
                              json = {"invoice": invoice,
                                      "comment": comment})
     
+    @check_wco_request
     def remove_invoice_hold(self, invoice, comment: str = ''):
         return self.request_session.post(url = self.host + "/rest/invoice/removeHold",
                              headers = {"Authorization": "Bearer " + self.session_token},
@@ -372,6 +397,7 @@ class Connection:
     #              Subtype must be one of "Abuse Fine", "Late Fine", "Loss", "Damage", "Usage Fee", "Supplies",
     #              "Overtime", "Labor", "Shipping", or "Other."
     #####
+    @check_wco_request
     def add_charge(self, invoice, amount, subtype: str, text: str = ''):
         return self.request_session.post(url = self.host + "/rest/invoice/addCharge",
                             headers = {"Authorization": "Bearer " + self.session_token},
@@ -380,12 +406,14 @@ class Connection:
                                     "subtype": subtype,
                                     "text": text})
     
+    @check_wco_request
     def add_invoice_note(self, invoice, text: str):
         return self.request_session.post(url = self.host + "/rest/invoice/addNote",
                             headers = {"Authorization": "Bearer " + self.session_token},
                             json = {"invoice": invoice,
                                     "text": text})
     
+    @check_wco_request
     def email_invoice(self, invoice):
         return self.request_session.post(url = self.host + "/rest/invoice/emailInvoice",
                             headers = {"Authorization": "Bearer " + self.session_token},
@@ -397,6 +425,7 @@ class Connection:
     # Output: Logout information
     # Description: Logout of the WCO session
     #####
+    @check_wco_request
     def close(self):
         return self.request_session.post(url = self.host + "/rest/session/logout",
                              headers = {"Authorization": "Bearer " + self.session_token})

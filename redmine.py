@@ -3,6 +3,7 @@ import re
 from connection import Connection
 from datetime import datetime, timezone, timedelta
 from postgres import Postgres
+from utils.Decorations import check_request
 
 class RedmineConnection:
 
@@ -274,6 +275,7 @@ class RedmineConnection:
             return "name/email must be specified"
         return self.session.get(url = self.host + f'/contacts.json?project_id={self.project_id}&search={search}')
 
+    @check_request
     def create_contact(self, first_name: str, last_name: str, email: str, middle_name: str = ''):
         return self.session.post(url = self.host + '/contacts.json',
                                  json = {"contact": {
@@ -285,6 +287,7 @@ class RedmineConnection:
                                  }})
 
     # no email sent to contact
+    @check_request
     def create_ticket(self, subject: str, contact_email, contact_first_name: str = '', contact_last_name: str = '', description: str = '', status_id: int = None, project_id: int = None):
         return self.session.post(url = self.host + '/helpdesk_tickets.json',
                                  json = {"helpdesk_ticket": {
@@ -300,6 +303,7 @@ class RedmineConnection:
                                                 "email": contact_email
                                          }}})
 
+    @check_request
     def email_patron(self, issue_id: int, status_id: int, content: str):
         return self.session.post(url = self.host + '/helpdesk/email_note.json',
                                  json = {"message": {
@@ -425,7 +429,7 @@ class Texting(RedmineConnection):
                         
                         #print(new_ticket.json())
                         
-                        print(f'Ticket #{new_ticket.json()["helpdesk_ticket"]["id"]} for {checkout["patron"]["name"]} created.')
+                        print(f'Ticket #{new_ticket["helpdesk_ticket"]["id"]} for {checkout["patron"]["name"]} created.')
         
                 phone_numbers.sort()
 

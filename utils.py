@@ -477,3 +477,38 @@ class Repercussions:
             self.final_consequences['Registrar Hold'] = True if self._get(bucket)['Registrar Hold'] or self.final_consequences['Registrar Hold'] else False
         
         return self.final_consequences
+
+class Decorations:
+
+    def check_wco_request(self, func):
+
+        def wrapper(*args, **kwargs):
+            response = func(*args, **kwargs)
+
+            ## Temporarily ignoring special cases
+            if type(response) != requests.Response:
+                return response
+            ##
+
+            # check response is good
+            # it is the job of functions using the wco_request function to cleanly save state and exit from errors such as this
+            reponse.raise_for_status()
+
+            # check response is good again since WCO returns HTTP 200 whenever possible
+            data = response.json()
+            ### continue with wco formatted checking
+            return data
+        
+        return wrapper
+    
+    def check_request(self, func):
+
+        def wrapper(*args, **kwargs):
+            response = func(*args, **kwargs)
+            # check response is good
+            # it is the job of functions using the wco_request function to cleanly save state and exit from errors such as this
+            response.raise_for_status()
+            data = response.json()
+            return data
+
+        return wrapper
