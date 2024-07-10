@@ -899,11 +899,13 @@ class Overdues:
             ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], '', self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
             self.rm_connection.email_patron(ticket.json()['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], canned_description)
     
-    def excluded_allocations(self, allocations: str):
+    def excluded_allocations(self, allocations: str, temporary: bool = False):
         allocation_list = allocations.split()
+        new_allocation_oids = []
         insert_query = ""
         for allocation in allocation_list:
             ck_oid = self.connection.get_checkout(id=allocation if not allocation.isdigit() else 'CK-' + allocation).json()['payload']['result'][0]['oid']
+            new_allocation_oids.append(ck_oid)
         
             self.db.run("INSERT INTO " \
                             "excluded_allocations (allocation_oid) " \
@@ -952,6 +954,9 @@ class Overdues:
                             i_id = i_oid,
                             p_id = p_oid) # convert previous hold/fee/registrar status to 1/0 for updating overdues
         
+        if temporary:
+            self.db.run("DELETE FROM excluded_allocations WHERE allocation_oid = ANY(%(temp_ids)s)", temp_ids = new_allocation_oids)
+
         if un_processed_allocs:
             self.db.run("UPDATE excluded_allocations SET processed = %(proc_date)s WHERE allocation_oid=ANY(%(a_id)s)",
                         proc_date = datetime.now(), a_id = un_processed_allocs)
