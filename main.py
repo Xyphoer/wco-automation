@@ -195,7 +195,8 @@ try:
         
         print(f"Processing overdues with start date {overdues_start_dt.isoformat(sep=' ', timespec='seconds')}, end date {overdues_start_dt.isoformat(sep=' ', timespec='seconds')}...")
 
-        oconn.excluded_allocations(input("Excluded allocations (whitespace seperation): "))
+        oconn.excluded_allocations(input("Permanent Excluded allocations (whitespace seperation): "))
+        oconn.excluded_allocations(input("Temporary Excluded allocations (whitespace seperation): "), temporary=True)
         oconn.update(overdues_start_dt, overdues_end_dt)
 
 finally:
