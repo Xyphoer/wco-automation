@@ -130,7 +130,7 @@ class Fines:
     def search_open(self):
 
         # request invoice information
-        invoices = self.connection.get_open_invoices().json()
+        invoices = self.connection.get_open_invoices()
         formatted_string = ""       # hold final output string
 
         # run for each invoice
@@ -188,7 +188,7 @@ class Dos:
 
             for allocation in allocations.copy():
                 
-                if self.connection.get_checkout(allocation[1]).json()['payload']['result'][0]['state'] == 'CHECKOUT':
+                if self.connection.get_checkout(allocation[1])['payload']['result'][0]['state'] == 'CHECKOUT':
                     allocations.remove(allocation)
                 else:
                     print(allocation[1])
@@ -276,7 +276,7 @@ class utils:
 
         if serials:        
             for response, serial in zip(self.connection.get_items_by_serial(serials), serials):
-                items = response.json()['payload']['result']
+                items = response['payload']['result']
                 if items:
                     out_string = f"Serial: {serial} - {', '.join(item['uniqueId'] + ' ' + item['statusString'] for item in items)}"
                     results.append(out_string)
@@ -322,7 +322,7 @@ class utils:
     def get_overdue_checkout_emails(self, center, start_time, end_time):
         emails = []
         
-        checkouts = self.connection.get_new_overdues(center.lower()).json()['payload']['result']
+        checkouts = self.connection.get_new_overdues(center.lower())['payload']['result']
         start_formatted = datetime.strptime(start_time, '%m/%d/%Y')
         end_formatted = datetime.strptime(end_time, '%m/%d/%Y')
 
@@ -340,7 +340,7 @@ class utils:
         alloc_types = []
         earliest_actual_start = start_time.isoformat()
 
-        checkouts = self.connection.get_allocations(query={"earliestActualStart": earliest_actual_start}, properties=['patronEmail', 'items', 'patron']).json()['payload']['result']
+        checkouts = self.connection.get_allocations(query={"earliestActualStart": earliest_actual_start}, properties=['patronEmail', 'items', 'patron'])['payload']['result']
         
         for checkout in checkouts:
             alloc_types = [alloc_type['rtype']['path'] for alloc_type in checkout['items'] if 'accessories' not in alloc_type['rtype']['path'].lower()]
@@ -477,38 +477,3 @@ class Repercussions:
             self.final_consequences['Registrar Hold'] = True if self._get(bucket)['Registrar Hold'] or self.final_consequences['Registrar Hold'] else False
         
         return self.final_consequences
-
-class Decorations:
-
-    def check_wco_request(self, func):
-
-        def wrapper(*args, **kwargs):
-            response = func(*args, **kwargs)
-
-            ## Temporarily ignoring special cases
-            if type(response) != requests.Response:
-                return response
-            ##
-
-            # check response is good
-            # it is the job of functions using the wco_request function to cleanly save state and exit from errors such as this
-            reponse.raise_for_status()
-
-            # check response is good again since WCO returns HTTP 200 whenever possible
-            data = response.json()
-            ### continue with wco formatted checking
-            return data
-        
-        return wrapper
-    
-    def check_request(self, func):
-
-        def wrapper(*args, **kwargs):
-            response = func(*args, **kwargs)
-            # check response is good
-            # it is the job of functions using the wco_request function to cleanly save state and exit from errors such as this
-            response.raise_for_status()
-            data = response.json()
-            return data
-
-        return wrapper

@@ -1,6 +1,6 @@
 import requests
 from datetime import datetime, timedelta
-from utils.Decorations import check_wco_request
+from decorators import check_wco_request
 
 #####
 # Name: Connection
@@ -19,17 +19,17 @@ class Connection:
         self.wco_session = self.start_session()
 
         # get and store session token, which will be need for authorizing requests
-        self.session_token = self.wco_session.json()['sessionToken']
+        self.session_token = self.wco_session['sessionToken']
 
         # get and store checkout center information
         # Compress into just dict?
-        self.college = self.wco_session.json()['payload']['roles']['operator'][1]
-        self.business = self.wco_session.json()['payload']['roles']['operator'][0]
-        self.ebling = self.wco_session.json()['payload']['roles']['operator'][3]
-        self.social = self.wco_session.json()['payload']['roles']['operator'][7]
-        self.steenbock = self.wco_session.json()['payload']['roles']['operator'][8]
-        self.memorial = self.wco_session.json()['payload']['roles']['operator'][6]
-        self.merit = self.wco_session.json()['payload']['roles']['operator'][5]
+        self.college = self.wco_session['payload']['roles']['operator'][1]
+        self.business = self.wco_session['payload']['roles']['operator'][0]
+        self.ebling = self.wco_session['payload']['roles']['operator'][3]
+        self.social = self.wco_session['payload']['roles']['operator'][7]
+        self.steenbock = self.wco_session['payload']['roles']['operator'][8]
+        self.memorial = self.wco_session['payload']['roles']['operator'][6]
+        self.merit = self.wco_session['payload']['roles']['operator'][5]
         self.centers = {
             "college": self.college,
             "business": self.business,
@@ -242,6 +242,7 @@ class Connection:
                                          headers = {"Authorization": "Bearer " + self.session_token},
                                          json = {"allocation": allocation})
     
+    @check_wco_request
     def delete_resource(self, resource_oid: int):
         delete_check = self.get_resource(resource_oid, ['deletable', 'deleted']).json()
         deletable, deleted = delete_check['payload']['deletable'], delete_check['payload']['deleted']

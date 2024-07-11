@@ -3,7 +3,7 @@ import re
 from connection import Connection
 from datetime import datetime, timezone, timedelta
 from postgres import Postgres
-from utils.Decorations import check_request
+from decorators import check_request
 
 class RedmineConnection:
 
@@ -45,7 +45,7 @@ class RedmineConnection:
                 changes = {checkout: {'return': False, 'renew': False} for checkout in checkouts}
 
                 for checkout in checkouts:
-                    wco_allocation = self.wco_connection.get_checkout(checkout).json()['payload']['result'][0]
+                    wco_allocation = self.wco_connection.get_checkout(checkout)['payload']['result'][0]
 
                     timestamp = wco_allocation['endTime']
                     timestamp_formatted = datetime.strptime(timestamp, '%Y-%m-%dT%H:%M:%S.%f%z')
@@ -159,7 +159,7 @@ class RedmineConnection:
         start_formatted = datetime.strptime(start, '%m/%d/%Y')
         end_formatted = datetime.strptime(end, '%m/%d/%Y') + timedelta(hours=23, minutes=59, seconds=59)
 
-        checkouts = {center:self.wco_connection.get_new_overdues(center.lower()).json()['payload']['result'] for center in centers}
+        checkouts = {center:self.wco_connection.get_new_overdues(center.lower())['payload']['result'] for center in centers}
 
         for location in checkouts:
             print(f"---{location}---\n")
@@ -462,10 +462,10 @@ class CannedMessages:
 
     def _get_checkout_info(self, invoice_oid: int):
         ck_oid, patron_oid = self.db.one('SELECT ck_oid, patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
-        allocation = self.wco_conn.get_allocation(ck_oid, ['items', 'patron', 'scheduledEndTime', 'checkoutCenter', 'realEndTime', 'uniqueId']).json()['payload']
+        allocation = self.wco_conn.get_allocation(ck_oid, ['items', 'patron', 'scheduledEndTime', 'checkoutCenter', 'realEndTime', 'uniqueId'])['payload']
         count = self.db.one('SELECT count FROM overdues WHERE patron_oid = %(p_oid)s', p_oid=patron_oid)
-        invoice = self.wco_conn.get_invoice(invoice_oid).json()['payload']
-        invoice_lines = self.wco_conn.get_invoice_lines(invoice).json()['payload']['result']
+        invoice = self.wco_conn.get_invoice(invoice_oid)['payload']
+        invoice_lines = self.wco_conn.get_invoice_lines(invoice)['payload']['result']
 
         classifications = []
         item_name = []
