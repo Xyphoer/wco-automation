@@ -1,3 +1,4 @@
+import logging
 from connection import Connection
 from redmine import Texting, RedmineConnection, CannedMessages
 from postgres import Postgres
@@ -6,9 +7,13 @@ from datetime import datetime, timedelta, timezone
 from utils import utils, Repercussions
 from os import system, chdir
 
+module_logger = logging.getLogger(__name__)
+
 class Overdues:
 
     def __init__(self, connection: Connection, utilities: utils, rm_connection: RedmineConnection, texting: Texting, db_pass):
+        self.logger = logging.getLogger(module_logger.name + ".Overdues")
+
         self.connection = connection
         self.rm_connection = rm_connection
         self.texting = texting
@@ -37,19 +42,19 @@ class Overdues:
         self.session_registrar_changes = []
     
     def update(self, start_time: str, end_time: str = '') -> dict:
-        print("Processing returned overdues...")    # basic logging
+        self.logger.info("Processing returned overdues")
         self._process_returned_overdues(start_time, end_time)
-        print("Processing current fines...")
+        self.logger.info("Processing current fines")
         self._process_fines()
-        print("Processing current holds...")
+        self.logger.info("Processing current holds")
         self._remove_holds()
-        print("Processing current overdues...")
+        self.logging.info("Processing current overdues")
         self._process_current_overdues()
-        print("Processing expirations...")
+        self.logging.info("Processing expirations")
         self._process_expirations()
-        print("Processing lost...")
+        self.logging.info("Processing lost")
         self._process_lost()
-        print("Processing registrar holds...")
+        self.logging.info("Processing registrar holds")
         self._process_registrar_holds()
  
     def _connect_to_db(self, db_pass) -> Postgres:
@@ -317,6 +322,7 @@ class Overdues:
 
         for allocation in allocations:
             if allocation['oid'] not in excluded_checkouts:
+                self.logger.debug(f'Processing returned overdue allocation_oid: {allocation["oid"]}')
                 # retrieve policy consequences based on allocation items, types, and overdue length (planned incorporation of count here instead of in sql upserts)
                 conseq, end_time, checkout_center = self.utils.get_overdue_consequence(allocation)
                 # used to decriment fee_count and/or registrar_count in database if one is removed
@@ -336,6 +342,7 @@ class Overdues:
                                 struck = True
                         if struck:
                             self.connection.apply_invoice_hold(invoice)
+                        self.logger.debug(f'Ensured removal of fine on allocation_oid: {allocation["oid"]}')
                         
                         # check if invoice had registrar hold
                         reg_hold = self.db.one("SELECT registrar_hold FROM invoices WHERE invoice_oid = %(i_id)s", i_id = entry[1])
@@ -351,7 +358,7 @@ class Overdues:
 
                                 self.session_registrar_changes.append((0, person['name'], person['barcode'], ticket['helpdesk_ticket']['id']))
 
-                                print(f"Items returned, registrar hold removed for oid: {person['oid']} -- {person['name']} - ({person['barcode']})")
+                                self.logger.info(f"Items returned, registrar hold removed for oid: {person['oid']} -- {person['name']} - ({person['barcode']})")
 
                             # included updating of db in overall updates
                             ##self.db.run("UPDATE invoices SET registrar_hold = False WHERE invoice_oid = %(i_id)s", i_id = entry[1])
@@ -504,22 +511,24 @@ class Overdues:
                                                                                                     p_oid = value[6]['patron']['oid'],
                                                                                                     expire = back_hold_remove_time + timedelta(days = ((365 * 4) - hold_len)))
                     # email only if invoice exists. This whole setup should be reworked
-                    if key not in current_hold_allocs:
-                        if value[1] == 'True':
-                            patron_oid = self.db.one('SELECT patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
-                            canned = CannedMessages(invoice_oid, self.connection, self.db).get_base()
-                            canned_subject, canned_description = canned['subject'], canned['description']
-                            person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName'])['payload']
-                            ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], '', self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
-                            self.rm_connection.email_patron(ticket['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], canned_description)
+                    # if key not in current_hold_allocs:
+                    #     if value[1] == 'True':
+                    #         patron_oid = self.db.one('SELECT patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
+                    #         canned = CannedMessages(invoice_oid, self.connection, self.db).get_base()
+                    #         canned_subject, canned_description = canned['subject'], canned['description']
+                    #         person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName'])['payload']
+                    #         ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], '', self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+                    #         self.rm_connection.email_patron(ticket['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], canned_description)
+                    #         self.logger.debug(f"Emailed patron_oid with template 'Base': {patron_oid} - ticket: {ticket['helpdesk_ticket']['id']}")
 
-                    else:
-                        patron_oid = self.db.one('SELECT patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
-                        canned = CannedMessages(invoice_oid, self.connection, self.db).get_returned()
-                        canned_subject, canned_description = canned['subject'], canned['description']
-                        person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName'])['payload']
-                        ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], '', self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
-                        self.rm_connection.email_patron(ticket['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], canned_description)
+                    # else:
+                    patron_oid = self.db.one('SELECT patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
+                    canned = CannedMessages(invoice_oid, self.connection, self.db).get_returned()
+                    canned_subject, canned_description = canned['subject'], canned['description']
+                    person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName'])['payload']
+                    ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], '', self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+                    self.rm_connection.email_patron(ticket['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], canned_description)
+                    self.logger.debug(f"Emailed patron_oid with template 'returned': {patron_oid} - ticket: {ticket['helpdesk_ticket']['id']}")
                 ### LEGACY from processing <1 day non-reserve overdues. No longer process, repercussions not necissary
                 # else:
                     # invoice_oid = -1 # signifies <1 day overdue of non-reserve. Should make own table eventually (stop-gap) | use negative invoice_oid values for differentiation
@@ -534,12 +543,14 @@ class Overdues:
                     #                                                                                 c_oid = key,
                     #                                                                                 p_oid = value[6]['patron']['oid'],
                     #                                                                                 expire = back_hold_remove_time + timedelta(days = ((365 * 4) - hold_len)))                                                                                                    )
+            # break up into better, more specific, and helpful exception catching
             except Exception as e:
-                print(key, value, invoice_oid)
-                print(e)
+                self.logger.error(key, value, invoice_oid)
+                self.logger.error(e)
             
         if not specific_checkouts:
             self.db.run(f"INSERT INTO history (time_ran) VALUES ('{end_search_time.isoformat()}')") # should isolate to own function running at end
+            self.logger.debug(f"Record time_ran to history: {end_search_time.isoformat()}")
         
         return
 
@@ -913,9 +924,12 @@ class Overdues:
                             "(%(ck_oid)s)" \
                         "ON CONFLICT (allocation_oid) DO NOTHING", ck_oid = ck_oid)
                         # maybe on conflict refresh expiration
+            
+            self.logger.debug(f'Adding new excluded allocation with oid = {ck_oid}')
         
         # process un-processed excluded_allocations (should just be the newly added ones above)
         un_processed_allocs = self.db.all("SELECT allocation_oid FROM excluded_allocations WHERE processed IS NULL")
+        self.logger.debug(f'Total unprocessed excluded allocation_oids: {un_processed_allocs}')
 
         if un_processed_allocs:
             # if the allocations has previously been processed, need to remove that processing
@@ -923,6 +937,7 @@ class Overdues:
         else:
             pre_processed = []
         for i_oid, p_oid, ck_oid, registrar_status in pre_processed:
+            self.logger.debug(f'Removing invoice for excluded allocation_oid = {ck_oid}, invoice_oid = {i_oid}, patron_oid = {p_oid}')
             self.remove_hold(i_oid)
             if registrar_status:
                 # if this is their only registrar hold
@@ -935,7 +950,7 @@ class Overdues:
 
                     self.session_registrar_changes.append((0, person['name'], person['barcode'], ticket['helpdesk_ticket']['id']))
 
-                    print(f'Excluded Registrar Hold Patron - Removed: {p_oid} -- {person["name"]} - ({person["barcode"]})')
+                    self.logger.info(f'Excluded Registrar Hold Patron - Removed: {p_oid} -- {person["name"]} - ({person["barcode"]})')
 
             with self.db.get_cursor() as cursor:
                 cursor.run("DELETE FROM invoices WHERE ck_oid = %(ck_oid)s RETURNING hold_status, fee_status, hold_length", ck_oid = ck_oid)
@@ -956,6 +971,7 @@ class Overdues:
         
         if temporary:
             self.db.run("DELETE FROM excluded_allocations WHERE allocation_oid = ANY(%(temp_ids)s)", temp_ids = new_allocation_oids)
+            self.logger.debug(f'Removing temporary allocation_oids from exclusions: {new_allocation_oids}')
 
         if un_processed_allocs:
             self.db.run("UPDATE excluded_allocations SET processed = %(proc_date)s WHERE allocation_oid=ANY(%(a_id)s)",

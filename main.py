@@ -4,6 +4,7 @@ from utils import *
 from overdues import Overdues
 import argparse
 from datetime import datetime
+import logging
 
 # set up argparse
 parser = argparse.ArgumentParser(prog = "WCO Automation",
@@ -38,8 +39,34 @@ parser.add_argument('-ce', '--checkout_emails', nargs=3,
 parser.add_argument('-po', '--process-overdues', action = 'store_true',
                     help = 'Runs the overdues repercussions script.' \
                     'Example usage: main.py -po')
+parser.add_argument('-log', '--log-level', type=int, choices=range(5), default=4,
+                    help="""Details how much info should be displayed. The higher, the more info.
+                    Each number includes everything from the numbers prior.
+                    0: No info  1: Critical Errors  2: Errors  3: Warnings  4: Info  5: Debug""")
 
 args = parser.parse_args()
+
+log_dict = {0: logging.NOTSET, 1: logging.CRITICAL, 2: logging.ERROR,  3: logging.WARNING, 4: logging.INFO, 5: logging.DEBUG}
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# file handler for all messages
+fh = logging.FileHandler(f'../logs/wco_automation[{datetime.now().strftime("%Y-%m-%d")}].log')
+fh.setLevel(logging.DEBUG)
+
+# console handler for user desired messages
+sh = logging.StreamHandler()
+sh.setLevel(log_dict[args.loglevel])
+
+# basic readable formatter for both outputs
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+fh.setFormatter(formatter)
+sh.setFormatter(formatter)
+
+# attach handlers to logger
+logger.addHandler(fh)
+logger.addHandler(sh)
 
 # get login info
 wco_host = ''
@@ -186,20 +213,30 @@ try:
         while overdues_correct_date_range.lower()[:1] != 'y':
             overdues_start = input("Overdues Start Date (mm/dd/yyyy): ")
             overdues_start_dt = datetime.strptime(overdues_start, '%m/%d/%Y') if '/' in overdues_start else oconn.last_run()
+            logger.debug(f'overdues_start time: {overdues_start_dt.isoformat()}')
+
             overdues_end = input("Overdues End Date: ")
             overdues_end_dt = datetime.strptime(overdues_end, '%m/%d/%Y') if '/' in overdues_end else datetime.now()
+            logger.debug(f'overdues_end time: {overdues_end_dt.isoformat()}')
+
             overdues_start_end_diff = overdues_end_dt - overdues_start_dt
             overdues_correct_date_range = input(f"Start Date of {overdues_start_dt.isoformat(sep=' ', timespec='seconds')} is " \
                                                 f"{overdues_start_end_diff.days} days, {overdues_start_end_diff.seconds // 3600} hours from end time of " \
                                                 f"{overdues_end_dt.isoformat(sep=' ', timespec='seconds')}. Is this correct? [y/n]: ")
         
-        print(f"Processing overdues with start date {overdues_start_dt.isoformat(sep=' ', timespec='seconds')}, end date {overdues_start_dt.isoformat(sep=' ', timespec='seconds')}...")
+        logger.info(f"Processing overdues with start date {overdues_start_dt.isoformat(sep=' ', timespec='seconds')}, end date {overdues_start_dt.isoformat(sep=' ', timespec='seconds')}...")
 
-        oconn.excluded_allocations(input("Permanent Excluded allocations (whitespace seperation): "))
-        oconn.excluded_allocations(input("Temporary Excluded allocations (whitespace seperation): "), temporary=True)
+        permanent_excluded_cks = input("Permanent Excluded allocations (whitespace seperation): ")
+        logger.debug('Processing permanent excluded allocations with input: ' + permanent_excluded_cks)
+        oconn.excluded_allocations(permanent_excluded_cks)
+
+        temporary_excluded_cks = input("Temporary Excluded allocations (whitespace seperation): ")
+        logger.debug('Processing temporary excluded allocations with input: ' + temporary_excluded_cks)
+        oconn.excluded_allocations(temporary_excluded_cks, temporary=True)
+
         oconn.update(overdues_start_dt, overdues_end_dt)
 
 finally:
      # always close the open connection before ending
     wco_connection.close()
-    print("Closed Connection.")
+    logger.info("Closed Connection.")
