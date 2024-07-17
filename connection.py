@@ -65,8 +65,8 @@ class Connection:
     @check_wco_request
     def set_scope(self, location_oid: int, _class: str = "organization"):
         return self.request_session.post(url = self.host + "/rest/session/setSessionScope",
-                      headers = {"Authorization": "Bearer " + self.session_token},
-                      json = {"checkoutCenter": {"_class": _class, "oid": location_oid}})
+                    headers = {"Authorization": "Bearer " + self.session_token},
+                    json = {_class: {"_class": _class, "oid": location_oid}})
     
     #####
     # Name: get_checkouts
