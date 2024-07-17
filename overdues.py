@@ -104,12 +104,12 @@ class Overdues:
         invoice = self.connection.create_invoice(account['payload']['defaultAccount'], checkout_center['organization'], checkout_center, allocation=allocation,
                                                 description=f"Invoice for violation of overdue policies: https://kb.wisc.edu/infolabs/131963. Previous overdue item count: {overdue_count if overdue_count else 0}")
         invoice_oid = invoice['payload']['oid']
+        self.logger.debug(f'invoice {invoice_oid} created')
         invoice = self.connection.update_invoice(invoice_oid, {"dueDate": None})
+        self.logger.debug(f'invoice {invoice_oid} due date removed')
         _hold = self.connection.apply_invoice_hold(invoice['payload'], message)
+        self.logger.debug(f'invoice {invoice_oid} hold applied')
         ck_oid = allocation['oid'] if allocation else None
-
-        if not invoice_oid:
-            print(f"Failed to create invoice for patron with oid {oid}")  # should be better
 
         if update_db:
             if end:
@@ -128,6 +128,7 @@ class Overdues:
                                         "hold_remove_time = overdues.hold_remove_time + EXCLUDED.hold_length, invoice_oids = overdues.invoice_oids || EXCLUDED.invoice_oids "\
                                 "RETURNING hold_remove_time", oid=oid, hold_l=hold_length, hold_rtime=end, i_id=str({invoice_oid}))
                     back_hold_remove_time = cursor.fetchone()[0] # gives datetime.datetime object for extended hold_remove time of sequential invoices
+                    self.logger.debug(f'invoice {invoice_oid} information stored in overdues database')
                 
                 self.db.run("INSERT INTO " \
                                 "invoices (invoice_oid, hold_status, hold_length, overdue_start_time, hold_remove_time, ck_oid, patron_oid)" \
@@ -137,6 +138,7 @@ class Overdues:
                                 "UPDATE SET hold_status = EXCLUDED.hold_status, hold_length = EXCLUDED.hold_length, overdue_start_time = EXCLUDED.overdue_start_time" \
                                     "hold_remove_time = EXCLUDED.hold_remove_time, ck_oid = EXCLUDED.ck_oid, patron_oid = EXCLUDED.patron_oid",
                             i_id = invoice_oid, hold_s=True, hold_l=hold_length, o_stime=overdue_time, hold_rtime=back_hold_remove_time, c_id = ck_oid, oid=oid)
+                self.logger.debug(f'invoice {invoice_oid} information stored in invoices database')
 
             # For no end, process same. 0D will be added to interval and to hold_remove_time. Invoice table entry will have 0 day and no hold_remove_time. Add to overall when returned.
             # Also, keep hold_status/fee_status = true even if hold_length is 0 and hold_remove_time is NULL. Only remove when all invoice oids have been removed.
@@ -148,6 +150,7 @@ class Overdues:
                             "ON CONFLICT (patron_oid) DO " \
                                 "UPDATE SET hold_count = overdues.hold_count + 1, invoice_oids = overdues.invoice_oids || EXCLUDED.invoice_oids ",
                                 oid=oid, i_id=str({invoice_oid}))
+                self.logger.debug(f'invoice {invoice_oid} information stored in overdues database')
                 
                 self.db.run("INSERT INTO " \
                                 "invoices (invoice_oid, hold_status, ck_oid, patron_oid, overdue_start_time)" \
@@ -156,12 +159,15 @@ class Overdues:
                             "ON CONFLICT (invoice_oid, ck_oid) DO " \
                                 "UPDATE SET hold_status = EXCLUDED.hold_status, ck_oid = EXCLUDED.ck_oid, patron_oid = EXCLUDED.patron_oid, overdue_start_time = EXCLUDED.overdue_start_time",
                             i_id = invoice_oid, hold_s=True, c_id = ck_oid, oid=oid, o_stime=overdue_time)
+                self.logger.debug(f'invoice {invoice_oid} information stored in invoices database')
             
             canned = CannedMessages(invoice_oid, self.connection, self.db).get_base()
             canned_subject, canned_description = canned['subject'], canned['description']
             person = self.connection.get_patron(oid, ['email', 'firstName', 'lastName'])['payload']
             ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], '', self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+            self.logger.info(f'redmine ticket {ticket["helpdesk_ticket"]["id"]} created')
             self.rm_connection.email_patron(ticket['helpdesk_ticket']['id'], status_id=self.rm_connection.statuses['Resolved'], content=canned_description)
+            self.logger.debug(f'redmine ticket {ticket["helpdesk_ticket"]["id"]} email sent')
 
         
         return invoice['payload']
