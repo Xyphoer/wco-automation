@@ -323,6 +323,9 @@ class Overdues:
         # update step: returns dictionary of changes
         insert_dict = {}
 
+        # to hold patron keys paired with their 
+        patron_overdue_counts = {}
+
         current_hold_allocs = self.db.all('SELECT ck_oid FROM invoices WHERE hold_status AND NOT (waived OR overdue_lost)')  # should tidy up and not do one big query, but single ones when needed
         current_fine_allocs = self.db.all('SELECT ck_oid, invoice_oid FROM invoices WHERE fee_status AND NOT (waived OR overdue_lost)')
         # any checkout specified by staff via 'excluded_allocations' or a checkout that has been returned solely for the purpose of declaring lost, should not be processed as a returned overdue checkout.
@@ -1048,7 +1051,6 @@ class Overdues:
         for patron_oid, invoice_oid in waived_pairs:
             self.db.run("UPDATE overdues SET invoice_oids = invoice_oids - '{%(i_id)s}'::integer[] WHERE patron_oid = %(p_oid)s", i_id = invoice_oid, p_oid = patron_oid)
 
-    
     # basic moving of end times from invoices to overdues
     def forward_invoice_end_times(self):
         patron_oids = self.db.all('SELECT patron_oid FROM overdues')
