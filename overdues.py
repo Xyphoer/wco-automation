@@ -1041,6 +1041,13 @@ class Overdues:
                 self.remove_hold(invoice_oid)
                 removed.append(invoice_oid)
         return removed
+
+    # remove invoice_oids from overdues invoice_oids that have already been waived
+    def remove_waived_invoices(self):
+        waived_pairs = self.db.all('SELECT patron_oid, invoice_oid FROM invoices WHERE waived')
+        for patron_oid, invoice_oid in waived_pairs:
+            self.db.run("UPDATE overdues SET invoice_oids = invoice_oids - '{%(i_id)s}'::integer[] WHERE patron_oid = %(p_oid)s", i_id = invoice_oid, p_oid = patron_oid)
+
     
     # basic moving of end times from invoices to overdues
     def forward_invoice_end_times(self):
