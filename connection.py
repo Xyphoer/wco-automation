@@ -80,7 +80,8 @@ class Connection:
         sorted_allocs = []
 
         # get checkouts for every location
-        for center in self.centers:
+        for center in self.centers.values():
+            self.set_scope(center['oid'], _class = "checkoutCenter")
             allocs = self.request_session.post(url = self.host + "/rest/allocation/search",
                                 headers = {"Authorization": "Bearer " + self.session_token},
                                 json = {"properties": ["patron", "activeTypes", "checkoutCenter"], 

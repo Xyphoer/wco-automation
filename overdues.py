@@ -5,7 +5,7 @@ from postgres import Postgres
 from postgres.cursors import TooMany
 from datetime import datetime, timedelta, timezone
 from utils import utils, Repercussions
-from os import system, chdir
+from os import system, chdir, getcwd
 
 module_logger = logging.getLogger(__name__)
 
@@ -18,13 +18,16 @@ class Overdues:
         self.rm_connection = rm_connection
         self.texting = texting
         self.utils = utilities
+
+        self.home = getcwd()
+
         self.db = self._connect_to_db(db_pass)
 
         self.register_changes_email=''
         self.register_changes_name_first=''
         self.register_changes_name_last=''
 
-        chdir('C:/Users/Public/Downloads/wco-automation')
+        chdir(self.home)
         with open('config.txt', 'r') as config: # can be bad if not calling from program directory. Make un-ambiguous
             for line in config:
                 if "register_changes_email" in line.lower():

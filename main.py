@@ -5,6 +5,7 @@ from overdues import Overdues
 import argparse
 from datetime import datetime
 import logging
+from os import path, mkdir
 
 # set up argparse
 parser = argparse.ArgumentParser(prog = "WCO Automation",
@@ -52,12 +53,14 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 # file handler for all messages
+if not path.exists('../logs'):
+    mkdir('../logs')
 fh = logging.FileHandler(f'../logs/wco_automation[{datetime.now().strftime("%Y-%m-%d")}].log')
 fh.setLevel(logging.DEBUG)
 
 # console handler for user desired messages
 sh = logging.StreamHandler()
-sh.setLevel(log_dict[args.loglevel])
+sh.setLevel(log_dict[args.log_level])
 
 # basic readable formatter for both outputs
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -136,7 +139,6 @@ try:
 
         # output patron info
         for patron in dupe_patrons:
-            patron = patron.json()
             print(f"Name: {patron['payload']['name']}\n" +
                   f"oid: {patron['payload']['oid']}\n" +
                   f"barcode: {patron['payload']['barcode']}\n\n")
