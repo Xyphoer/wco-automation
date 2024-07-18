@@ -37,10 +37,13 @@ class Overdues:
                 if "register_changes_name_last" in line.lower():
                     self.register_changes_name_last = line.split("=", maxsplit=1)[1].strip()
         if not (self.register_changes_email and self.register_changes_name_first and self.register_changes_name_last):
-            print('Incomplete data on registrar changes contact info. Please provide data.')
+            self.logger.info('Incomplete data on registrar changes contact info. Please provide data.')
             self.register_changes_email = input("Contact email: ")
+            self.logger.debug(self.register_changes_email)
             self.register_changes_name_first = input("Contact First Name: ")
+            self.logger.debug(self.register_changes_name_first)
             self.register_changes_name_last = input("Contact Last Name")
+            self.logger.debug(self.register_changes_name_last)
 
         self.session_registrar_changes = []
     
@@ -71,7 +74,9 @@ class Overdues:
         if response != 0: # is not running == 3
             start = system('pg_ctl start -w -D "C:/Program Files/PostgreSQL/16/data"')
             if start != 0: # failed to start
-                raise OSError('Failed to connected to database at "C:/Program Files/PostgreSQL/16/data"')
+                err = OSError('Failed to connected to database at "C:/Program Files/PostgreSQL/16/data"')
+                self.logger.exception(err)
+                raise err
         
         if response == 0 or start == 0:
             db = Postgres(f"dbname=postgres user=postgres password={db_pass}")
