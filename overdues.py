@@ -390,180 +390,170 @@ class Overdues:
                     if item_returned > allocation_due + timedelta(minutes=10):
                         item_count += 1
 
-                ## processing checkouts singularly, no checkout should repeat.
-                # try:
-                #     insert_dict[allocation['oid']][0] += item_count
-                #     insert_dict[allocation['oid']][1:] = ['True' if conseq['Hold'] else 'False',  # hold_status
-                #                                                     'False',                                # fee_status ALWAYS false for returned items
-                #                                                     conseq['Hold'],                         # hold_length
-                #                                                     f"'{end_time + timedelta(days=conseq['Hold'])}'" if conseq['Hold'] else 'NULL', # hold_remove_time (from ck end time)
-                #                                                     checkout_center,    # checkout center for hold
-                #                                                     allocation,
-                #                                                     fee_status,
-                #                                                     registrar_status]
+                key = allocation['oid']
+                value = [item_count,
+                        'True' if conseq['Hold'] else 'False',  # hold_status
+                        'False',                                # fee_status ALWAYS false for returned items
+                        conseq['Hold'],                         # hold_length
+                        f"CAST('{end_time + timedelta(days=conseq['Hold'])}' AS TIMESTAMP)" if conseq['Hold'] else 'NULL', # hold_remove_time (from ck end time)
+                        checkout_center,    # checkout center for hold
+                        allocation,         # allocation to attach the hold to, as well as for extra invoice information
+                        fee_status,         # amount to decriment from database fee_count
+                        registrar_status]   # amount to decriment from database registrar_hold_count
+                insert_dict[key] = value
 
-                # except KeyError as e:
-                ##
-                insert_dict[allocation['oid']] = [item_count,
-                                                  'True' if conseq['Hold'] else 'False',  # hold_status
-                                                  'False',                                # fee_status ALWAYS false for returned items
-                                                  conseq['Hold'],                         # hold_length
-                                                  f"CAST('{end_time + timedelta(days=conseq['Hold'])}' AS TIMESTAMP)" if conseq['Hold'] else 'NULL', # hold_remove_time (from ck end time)
-                                                  checkout_center,    # checkout center for hold
-                                                  allocation,         # allocation to attach the hold to, as well as for extra invoice information
-                                                  fee_status,         # amount to decriment from database fee_count
-                                                  registrar_status]   # amount to decriment from database registrar_hold_count
+                # update db
+                # update as we go for safety and reliability of keeping the db up to date with changes
 
-        for key, value in insert_dict.items():
-            try:
-                invoice_oid = False
+                try:
+                    invoice_oid = False
 
-                ## Count potentially be moved into loop for allocs
-                # get invoice information and email the patron with information now that they've returned
-                # place hold if one is not already in place
-                if key not in current_hold_allocs:
-                    if value[1] == 'True':
-                        invoice = self.place_hold(value[6]['patron']['oid'], checkout_center=value[5], allocation=value[6], update_db=False)
-                        invoice_oid = invoice['oid']
+                    ## Count potentially be moved into loop for allocs
+                    # get invoice information and email the patron with information now that they've returned
+                    # place hold if one is not already in place
+                    if key not in current_hold_allocs:
+                        if value[1] == 'True':
+                            invoice = self.place_hold(value[6]['patron']['oid'], checkout_center=value[5], allocation=value[6], update_db=False)
+                            invoice_oid = invoice['oid']
 
-                else:
-                    try:
-                        invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid = %(a_id)s', a_id = value[6]['oid'])
-                    except TooMany as e:
-                        # temporary fix for conversion from old db using existing checkouts
-                        self.db.run('UPDATE invoices SET ck_oid = -ck_oid WHERE ck_oid = %(a_id)s AND waived', a_id = value[6]['oid'])
-                        invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid = %(a_id)s', a_id = value[6]['oid'])
-                    invoice = self.connection.get_invoice(invoice_oid)['payload']
+                    else:
+                        try:
+                            invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid = %(a_id)s', a_id = value[6]['oid'])
+                        except TooMany as e:
+                            # temporary fix for conversion from old db using existing checkouts
+                            self.db.run('UPDATE invoices SET ck_oid = -ck_oid WHERE ck_oid = %(a_id)s AND waived', a_id = value[6]['oid'])
+                            invoice_oid = self.db.one('SELECT invoice_oid FROM invoices WHERE ck_oid = %(a_id)s', a_id = value[6]['oid'])
+                        invoice = self.connection.get_invoice(invoice_oid)['payload']
 
-                if invoice_oid:
-                    # Insert individually as processing:
-                    ## DB more up to date if issue is encountered
-                    ## Simpler solution for one given patron having multiple new invoices (both need to append)
-                    ## Relatively few new invoices to process on a typical run so slightly slower updating is acceptable
+                    if invoice_oid:
+                        # Insert individually as processing:
+                        ## DB more up to date if issue is encountered
+                        ## Simpler solution for one given patron having multiple new invoices (both need to append)
+                        ## Relatively few new invoices to process on a typical run so slightly slower updating is acceptable
 
-                    ### NOTE: Overdue amount thresholds are Greater Than, not only once
-                    ### NOTE: only update count and hold_count when not already processed by current_overdue_checkouts (i.e. had to create invoice) (if already stored, was already created)
-                    # NOTE: CURRENT ISSUE: ambiguity in using current checkout count for determining hold length. If a checkout has been processed by process_current_overdues it will count the current amount, however if it hasn't, it wont.
-                    # In _process_fines it will always take the current amount into account. Possible fixes: Make a query first to see if it's been processed before (i.e. invoice exists) and process differently depending on the result.
+                        ### NOTE: Overdue amount thresholds are Greater Than, not only once
+                        ### NOTE: only update count and hold_count when not already processed by current_overdue_checkouts (i.e. had to create invoice) (if already stored, was already created)
+                        # NOTE: CURRENT ISSUE: ambiguity in using current checkout count for determining hold length. If a checkout has been processed by process_current_overdues it will count the current amount, however if it hasn't, it wont.
+                        # In _process_fines it will always take the current amount into account. Possible fixes: Make a query first to see if it's been processed before (i.e. invoice exists) and process differently depending on the result.
 
-                    # using nested case statements unsures overdues.count is always the latest in the comparison, but is messy. Test performance with seperate query
-                    with self.db.get_cursor() as cursor:
-                        cursor.run("INSERT INTO " \
-                                        "overdues (patron_oid, count, hold_count, fee_count, hold_length, hold_remove_time, invoice_oids) " \
+                        # using nested case statements unsures overdues.count is always the latest in the comparison, but is messy. Test performance with seperate query
+                        with self.db.get_cursor() as cursor:
+                            cursor.run("INSERT INTO " \
+                                            "overdues (patron_oid, count, hold_count, fee_count, hold_length, hold_remove_time, invoice_oids) " \
+                                        "VALUES " \
+                                            "(%(oid)s, %(i_count)s, %(hold_c)s, 0, CAST('%(hold_l)sD' AS INTERVAL)," + f" {value[4]}, " + "%(i_id)s) " \
+                                        "ON CONFLICT (patron_oid) DO " \
+                                            "UPDATE SET count = overdues.count + EXCLUDED.count, " \
+                                            "hold_count = CASE WHEN %(i_id_plain)s = ANY(overdues.invoice_oids) THEN overdues.hold_count ELSE overdues.hold_count + EXCLUDED.hold_count END, " \
+                                            "fee_count = overdues.fee_count - %(fee_c)s, " \
+                                            "hold_length = CASE " \
+                                                "WHEN overdues.count + EXCLUDED.count >= 12 " \
+                                                    "THEN '0'::INTERVAL " \
+                                                "WHEN overdues.count + EXCLUDED.count >= 10 " \
+                                                    "THEN overdues.hold_length + '180D'::INTERVAL " \
+                                                "WHEN overdues.count + EXCLUDED.count >= 5 " \
+                                                    "THEN overdues.hold_length + '90D'::INTERVAL " \
+                                                "ELSE overdues.hold_length + EXCLUDED.hold_length " \
+                                            "END, " \
+                                            "hold_remove_time = CASE " \
+                                                "WHEN overdues.count + EXCLUDED.count >= 12 " \
+                                                    "THEN NULL::TIMESTAMP " \
+                                                "WHEN overdues.count + EXCLUDED.count >= 10 AND overdues.hold_remove_time IS NULL " \
+                                                    "THEN (EXCLUDED.hold_remove_time - EXCLUDED.hold_length + '180D'::INTERVAL)::TIMESTAMP " \
+                                                "WHEN overdues.count + EXCLUDED.count >= 10 AND overdues.hold_remove_time IS NOT NULL " \
+                                                    "THEN overdues.hold_remove_time + '180D'::INTERVAL " \
+                                                "WHEN overdues.count + EXCLUDED.count >= 5 AND overdues.hold_remove_time IS NULL " \
+                                                    "THEN (EXCLUDED.hold_remove_time - EXCLUDED.hold_length + '90D'::INTERVAL)::TIMESTAMP " \
+                                                "WHEN overdues.count + EXCLUDED.count >= 5 AND overdues.hold_remove_time IS NOT NULL " \
+                                                    "THEN overdues.hold_remove_time + '90D'::INTERVAL " \
+                                                "WHEN overdues.hold_remove_time IS NULL " \
+                                                    "THEN EXCLUDED.hold_remove_time " \
+                                                "ELSE overdues.hold_remove_time + EXCLUDED.hold_length " \
+                                            "END, " \
+                                            "invoice_oids = CASE WHEN %(i_id_plain)s = ANY(overdues.invoice_oids) THEN overdues.invoice_oids ELSE overdues.invoice_oids || EXCLUDED.invoice_oids END, "\
+                                            "registrar_hold_count = overdues.registrar_hold_count - %(r_hold_c)s " \
+                                        "RETURNING hold_remove_time, overdues.count",
+                                                                    oid        = value[6]['patron']['oid'],
+                                                                    i_count    = value[0],
+                                                                    hold_c     = 1 if value[1]=='True' else 0,
+                                                                    fee_c      = value[7],
+                                                                    hold_l     = value[3],
+                                                                    i_id       = str({invoice_oid}) if invoice_oid else '{}',
+                                                                    i_id_plain = invoice_oid if invoice_oid else -2,
+                                                                    r_hold_c   = value[8]) # hold_rtime = value[4],
+                            back_hold_remove_time, overdues_count = cursor.fetchone() # gives datetime.datetime object for extended hold_remove time of sequential invoices
+                        
+                        hold_len = value[3]
+                        if overdues_count >= 12:
+                            hold_len = 0
+                        elif overdues_count >= 10:
+                            hold_len = 180
+                        elif overdues_count >= 5:
+                            hold_len = 90
+                        
+                        # add/update invoice entry in invoices db.
+                        ## When updating:
+                        #### count: No change. Both should be the same
+                        #### hold_status: No change. hold should always be in place here
+                        #### fee_status: Take new value. Fee should be removed.
+                        #### hold_length: Take new value. Just calculated final hold_length
+                        #### hold_remove_time: Take new value. Just calculated
+                        #### ck_oid: No change. Both should be the same
+                        #### patron_oid: No change: Both should be the same
+                        #### registrar_hold: Should be removed.
+                        self.db.run("INSERT INTO " \
+                                        "invoices (invoice_oid, count, hold_status, fee_status, hold_length, overdue_start_time, hold_remove_time, ck_oid, patron_oid, expiration, registrar_hold) " \
                                     "VALUES " \
-                                        "(%(oid)s, %(i_count)s, %(hold_c)s, 0, CAST('%(hold_l)sD' AS INTERVAL)," + f" {value[4]}, " + "%(i_id)s) " \
-                                    "ON CONFLICT (patron_oid) DO " \
-                                        "UPDATE SET count = overdues.count + EXCLUDED.count, " \
-                                        "hold_count = CASE WHEN %(i_id_plain)s = ANY(overdues.invoice_oids) THEN overdues.hold_count ELSE overdues.hold_count + EXCLUDED.hold_count END, " \
-                                        "fee_count = overdues.fee_count - %(fee_c)s, " \
-                                        "hold_length = CASE " \
-                                            "WHEN overdues.count + EXCLUDED.count >= 12 " \
-                                                "THEN '0'::INTERVAL " \
-                                            "WHEN overdues.count + EXCLUDED.count >= 10 " \
-                                                "THEN overdues.hold_length + '180D'::INTERVAL " \
-                                            "WHEN overdues.count + EXCLUDED.count >= 5 " \
-                                                "THEN overdues.hold_length + '90D'::INTERVAL " \
-                                            "ELSE overdues.hold_length + EXCLUDED.hold_length " \
-                                        "END, " \
-                                        "hold_remove_time = CASE " \
-                                            "WHEN overdues.count + EXCLUDED.count >= 12 " \
-                                                "THEN NULL::TIMESTAMP " \
-                                            "WHEN overdues.count + EXCLUDED.count >= 10 AND overdues.hold_remove_time IS NULL " \
-                                                "THEN (EXCLUDED.hold_remove_time - EXCLUDED.hold_length + '180D'::INTERVAL)::TIMESTAMP " \
-                                            "WHEN overdues.count + EXCLUDED.count >= 10 AND overdues.hold_remove_time IS NOT NULL " \
-                                                "THEN overdues.hold_remove_time + '180D'::INTERVAL " \
-                                            "WHEN overdues.count + EXCLUDED.count >= 5 AND overdues.hold_remove_time IS NULL " \
-                                                "THEN (EXCLUDED.hold_remove_time - EXCLUDED.hold_length + '90D'::INTERVAL)::TIMESTAMP " \
-                                            "WHEN overdues.count + EXCLUDED.count >= 5 AND overdues.hold_remove_time IS NOT NULL " \
-                                                "THEN overdues.hold_remove_time + '90D'::INTERVAL " \
-                                            "WHEN overdues.hold_remove_time IS NULL " \
-                                                "THEN EXCLUDED.hold_remove_time " \
-                                            "ELSE overdues.hold_remove_time + EXCLUDED.hold_length " \
-                                        "END, " \
-                                        "invoice_oids = CASE WHEN %(i_id_plain)s = ANY(overdues.invoice_oids) THEN overdues.invoice_oids ELSE overdues.invoice_oids || EXCLUDED.invoice_oids END, "\
-                                        "registrar_hold_count = overdues.registrar_hold_count - %(r_hold_c)s " \
-                                    "RETURNING hold_remove_time, overdues.count",
-                                                                oid        = value[6]['patron']['oid'],
-                                                                i_count    = value[0],
-                                                                hold_c     = 1 if value[1]=='True' else 0,
-                                                                fee_c      = value[7],
-                                                                hold_l     = value[3],
-                                                                i_id       = str({invoice_oid}) if invoice_oid else '{}',
-                                                                i_id_plain = invoice_oid if invoice_oid else -2,
-                                                                r_hold_c   = value[8]) # hold_rtime = value[4],
-                        back_hold_remove_time, overdues_count = cursor.fetchone() # gives datetime.datetime object for extended hold_remove time of sequential invoices
-                    
-                    hold_len = value[3]
-                    if overdues_count >= 12:
-                        hold_len = 0
-                    elif overdues_count >= 10:
-                        hold_len = 180
-                    elif overdues_count >= 5:
-                        hold_len = 90
-                    
-                    # add/update invoice entry in invoices db.
-                    ## When updating:
-                    #### count: No change. Both should be the same
-                    #### hold_status: No change. hold should always be in place here
-                    #### fee_status: Take new value. Fee should be removed.
-                    #### hold_length: Take new value. Just calculated final hold_length
-                    #### hold_remove_time: Take new value. Just calculated
-                    #### ck_oid: No change. Both should be the same
-                    #### patron_oid: No change: Both should be the same
-                    #### registrar_hold: Should be removed.
-                    self.db.run("INSERT INTO " \
-                                    "invoices (invoice_oid, count, hold_status, fee_status, hold_length, overdue_start_time, hold_remove_time, ck_oid, patron_oid, expiration, registrar_hold) " \
-                                "VALUES " \
-                                    "(%(i_id)s, %(i_count)s, %(hold_s)s, False, CAST('%(hold_l)sD' AS INTERVAL), CAST(%(o_stime)s AS TIMESTAMP), CAST(%(hold_rtime)s AS TIMESTAMP), %(c_oid)s, %(p_oid)s, CAST(%(expire)s AS TIMESTAMP), False)" \
-                                "ON CONFLICT (invoice_oid, ck_oid) DO " \
-                                    "UPDATE SET count = EXCLUDED.count, hold_status = EXCLUDED.hold_status, fee_status = EXCLUDED.fee_status, " \
-                                        "hold_length = EXCLUDED.hold_length, hold_remove_time = EXCLUDED.hold_remove_time, " \
-                                        "expiration = EXCLUDED.expiration, registrar_hold = False", i_id = invoice_oid,
-                                                                                                    i_count = value[0],
-                                                                                                    hold_s = value[1],
-                                                                                                    hold_l = hold_len,
-                                                                                                    o_stime = datetime.strptime(value[6]['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z'),
-                                                                                                    hold_rtime = back_hold_remove_time,
-                                                                                                    c_oid = key,
-                                                                                                    p_oid = value[6]['patron']['oid'],
-                                                                                                    expire = back_hold_remove_time + timedelta(days = ((365 * 4) - hold_len)))
-                    # email only if invoice exists. This whole setup should be reworked
-                    # if key not in current_hold_allocs:
-                    #     if value[1] == 'True':
-                    #         patron_oid = self.db.one('SELECT patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
-                    #         canned = CannedMessages(invoice_oid, self.connection, self.db).get_base()
-                    #         canned_subject, canned_description = canned['subject'], canned['description']
-                    #         person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName'])['payload']
-                    #         ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], '', self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
-                    #         self.rm_connection.email_patron(ticket['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], canned_description)
-                    #         self.logger.debug(f"Emailed patron_oid with template 'Base': {patron_oid} - ticket: {ticket['helpdesk_ticket']['id']}")
+                                        "(%(i_id)s, %(i_count)s, %(hold_s)s, False, CAST('%(hold_l)sD' AS INTERVAL), CAST(%(o_stime)s AS TIMESTAMP), CAST(%(hold_rtime)s AS TIMESTAMP), %(c_oid)s, %(p_oid)s, CAST(%(expire)s AS TIMESTAMP), False)" \
+                                    "ON CONFLICT (invoice_oid, ck_oid) DO " \
+                                        "UPDATE SET count = EXCLUDED.count, hold_status = EXCLUDED.hold_status, fee_status = EXCLUDED.fee_status, " \
+                                            "hold_length = EXCLUDED.hold_length, hold_remove_time = EXCLUDED.hold_remove_time, " \
+                                            "expiration = EXCLUDED.expiration, registrar_hold = False", i_id = invoice_oid,
+                                                                                                        i_count = value[0],
+                                                                                                        hold_s = value[1],
+                                                                                                        hold_l = hold_len,
+                                                                                                        o_stime = datetime.strptime(value[6]['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z'),
+                                                                                                        hold_rtime = back_hold_remove_time,
+                                                                                                        c_oid = key,
+                                                                                                        p_oid = value[6]['patron']['oid'],
+                                                                                                        expire = back_hold_remove_time + timedelta(days = ((365 * 4) - hold_len)))
+                        # email only if invoice exists. This whole setup should be reworked
+                        # if key not in current_hold_allocs:
+                        #     if value[1] == 'True':
+                        #         patron_oid = self.db.one('SELECT patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
+                        #         canned = CannedMessages(invoice_oid, self.connection, self.db).get_base()
+                        #         canned_subject, canned_description = canned['subject'], canned['description']
+                        #         person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName'])['payload']
+                        #         ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], '', self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+                        #         self.rm_connection.email_patron(ticket['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], canned_description)
+                        #         self.logger.debug(f"Emailed patron_oid with template 'Base': {patron_oid} - ticket: {ticket['helpdesk_ticket']['id']}")
 
+                        # else:
+                        patron_oid = self.db.one('SELECT patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
+                        canned = CannedMessages(invoice_oid, self.connection, self.db).get_returned()
+                        canned_subject, canned_description = canned['subject'], canned['description']
+                        person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName'])['payload']
+                        ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], '', self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+                        self.rm_connection.email_patron(ticket['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], canned_description)
+                        self.logger.debug(f"Emailed patron_oid with template 'returned': {patron_oid} - ticket: {ticket['helpdesk_ticket']['id']}")
+                    ### LEGACY from processing <1 day non-reserve overdues. No longer process, repercussions not necissary
                     # else:
-                    patron_oid = self.db.one('SELECT patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
-                    canned = CannedMessages(invoice_oid, self.connection, self.db).get_returned()
-                    canned_subject, canned_description = canned['subject'], canned['description']
-                    person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName'])['payload']
-                    ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], '', self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
-                    self.rm_connection.email_patron(ticket['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], canned_description)
-                    self.logger.debug(f"Emailed patron_oid with template 'returned': {patron_oid} - ticket: {ticket['helpdesk_ticket']['id']}")
-                ### LEGACY from processing <1 day non-reserve overdues. No longer process, repercussions not necissary
-                # else:
-                    # invoice_oid = -1 # signifies <1 day overdue of non-reserve. Should make own table eventually (stop-gap) | use negative invoice_oid values for differentiation
-                    # self.db.run("INSERT INTO " \
-                    #                 "invoices (invoice_oid, count, overdue_start_time, ck_oid, patron_oid, expiration, registrar_hold) " \
-                    #             "VALUES " \
-                    #                 "(%(i_id)s, %(i_count)s, CAST(%(o_stime)s AS TIMESTAMP), %(c_oid)s, %(p_oid)s, '%(expire)s'::TIMESTAMP)" \
-                    #             "ON CONFLICT (invoice_oid) DO " \
-                    #                 "UPDATE SET count = EXCLUDED.count, expiration = EXCLUDED.expiration", i_id = invoice_oid,
-                    #                                                                                 i_count = value[0],
-                    #                                                                                 o_stime = datetime.strptime(value[6]['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z'),
-                    #                                                                                 c_oid = key,
-                    #                                                                                 p_oid = value[6]['patron']['oid'],
-                    #                                                                                 expire = back_hold_remove_time + timedelta(days = ((365 * 4) - hold_len)))                                                                                                    )
-            # break up into better, more specific, and helpful exception catching
-            except Exception as e:
-                self.logger.error(key, value, invoice_oid)
-                self.logger.error(e)
+                        # invoice_oid = -1 # signifies <1 day overdue of non-reserve. Should make own table eventually (stop-gap) | use negative invoice_oid values for differentiation
+                        # self.db.run("INSERT INTO " \
+                        #                 "invoices (invoice_oid, count, overdue_start_time, ck_oid, patron_oid, expiration, registrar_hold) " \
+                        #             "VALUES " \
+                        #                 "(%(i_id)s, %(i_count)s, CAST(%(o_stime)s AS TIMESTAMP), %(c_oid)s, %(p_oid)s, '%(expire)s'::TIMESTAMP)" \
+                        #             "ON CONFLICT (invoice_oid) DO " \
+                        #                 "UPDATE SET count = EXCLUDED.count, expiration = EXCLUDED.expiration", i_id = invoice_oid,
+                        #                                                                                 i_count = value[0],
+                        #                                                                                 o_stime = datetime.strptime(value[6]['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z'),
+                        #                                                                                 c_oid = key,
+                        #                                                                                 p_oid = value[6]['patron']['oid'],
+                        #                                                                                 expire = back_hold_remove_time + timedelta(days = ((365 * 4) - hold_len)))                                                                                                    )
+                # break up into better, more specific, and helpful exception catching
+                except Exception as e:
+                    self.logger.error(key, value, invoice_oid)
+                    self.logger.error(e)
             
         if not specific_checkouts:
             self.db.run(f"INSERT INTO history (time_ran) VALUES ('{end_search_time.isoformat()}')") # should isolate to own function running at end
