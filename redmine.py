@@ -381,13 +381,8 @@ class Texting(RedmineConnection):
                                             f"Texted {time_now.strftime('%m/%d/%Y')}"
 
                                 ## Stay as resolved
-                                # must always go from resolved to new to working on it (redmine doesn't support going from resolved to working on it)
-                                # self.session.put(url=f'https://redmine.library.wisc.edu/issues/{result["id"]}.json',
-                                #                 auth=(self.redmine_auth_key, ''),
-                                #                 json={'issue': {'status_id': 19, 'notes': update_text}})
-                                # self.session.put(url=f'https://redmine.library.wisc.edu/issues/{result["id"]}.json',
-                                #                 auth=(self.redmine_auth_key, ''),
-                                #                 json={'issue': {'status_id': 14}})
+                                self.session.put(url=f'https://redmine.library.wisc.edu/issues/{result["id"]}.json',
+                                                json={'issue': {'status_id': self.statuses['Resolved'], 'notes': update_text}})
                                 
                                 print(f'Ticket #{result["id"]} updated with:\n{update_text}\n')
                             
