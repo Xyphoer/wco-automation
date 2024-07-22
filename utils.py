@@ -295,6 +295,8 @@ class utils:
         for item in allocation['items']:
             end_time = datetime.strptime(item['realReturnTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
             overdue_length = end_time - scheduled_end
+            # if allocation has a previously returned item that was returned not overdue, it's length would be 0, and no hold should be placed for it
+            # However it would be good to add a check
             
             try:
                 type_buckets[overdue_length.days].append(item['rtype'])
