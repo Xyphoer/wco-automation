@@ -285,41 +285,27 @@ class utils:
         
         return results
     
-    def get_overdue_consequence(self, allocation) -> tuple[dict, datetime, dict]:
+    def get_overdue_consequence(self, allocation, overdue_count: int) -> tuple[dict, datetime, dict]:
         alloc_end_time = datetime.strptime(allocation['realEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
 
         scheduled_end = datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
         tz = timezone(timedelta(hours=-6), name='utc-6')
 
-        type_buckets = {}
+        length_type_pairs = []
         for item in allocation['items']:
             end_time = datetime.strptime(item['realReturnTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
             overdue_length = end_time - scheduled_end
+
             # if allocation has a previously returned item that was returned not overdue, it's length would be 0, and no hold should be placed for it
-            # However it would be good to add a check
-            
-            try:
-                type_buckets[overdue_length.days].append(item['rtype'])
-            except KeyError as e:
-                type_buckets[overdue_length.days] = [item['rtype']]
-
-        results = []
-        for overdue_length, type_bucket in type_buckets.items():
-            result = Repercussions(overdue_length, type_bucket)
-            result.update()
-
-            results.append(result.final_consequences)
+            if overdue_length.days > 0:
+                length_type_pairs.append(overdue_length.days, item['rtype'])
         
-        final_result = results[0]
-        for result in results[1:]:
-            if result['Registrar Hold'] and not final_result['Registrar Hold']:
-                final_result['Registrar Hold'] = True
-            if result['Fee'] and not final_result['Fee']:
-                final_result['Fee'] = True
-            # consecutive placement of hold lengths
-            final_result['Hold'] += result['Hold']
+        if length_type_pairs:
+            result = Repercussions(length_type_pairs, overdue_count).update()
+        else:
+            result = {'Hold': 0, 'Fee': False, 'Registrar Hold': False}
 
-        return final_result, alloc_end_time, allocation['checkoutCenter']
+        return result, alloc_end_time, allocation['checkoutCenter']
 
     def get_overdue_checkout_emails(self, center, start_time, end_time):
         emails = []
@@ -356,7 +342,7 @@ class utils:
 
 class Repercussions:
 
-    def __init__(self, overdue_length: int, alloc_types):
+    def __init__(self, length_type_pairs: list[tuple[int, str]], overdue_count: int = None):
         self.resource_type_consequence_mapping = {
             'Accessories': {
                 # Up to 1 day
@@ -367,7 +353,7 @@ class Repercussions:
                 },
                 # More than 1 day
                 1: {
-                    'Hold': overdue_length,  # length of overdue
+                    'Hold': -1,  # length of overdue
                     'Fee': False,
                     'Registrar Hold': False
                 },
@@ -393,7 +379,7 @@ class Repercussions:
                 },
                 # More than 1 day
                 1: {
-                    'Hold': overdue_length,  # length of overdue
+                    'Hold': -1,  # length of overdue
                     'Fee': False,
                     'Registrar Hold': False
                 },
@@ -435,6 +421,14 @@ class Repercussions:
                     'Fee': True,
                     'Registrar Hold': True
                 }
+            },
+            'Overdue Count': {
+                # at 5, 90 day hold
+                5: 90,
+                # at 10, 180 day hold
+                10: 180,
+                # at 12, ban
+                12: -2
             }
         }
         self.final_consequences = {
@@ -444,11 +438,15 @@ class Repercussions:
         }
         self.upper_limits = (0, 1, 10, 20)
         # checks which section of "length of overdue" patron is in - Actual hold length comes from self.resource_type_consequence_mapping with a type
-        self.overdue_length = self._ceil(overdue_length)
-        self.alloc_types = alloc_types
+        self.overdue_pairs = [(self._ceil(pair[0]), self._get_bucket(pair[1])) for pair in length_type_pairs]
+        self.overdue_count = overdue_count
 
-    def _get(self, idx):
-        return self.resource_type_consequence_mapping[idx][self.overdue_length]
+    def _get(self, idx, length):
+        conseq = self.resource_type_consequence_mapping[idx][length]
+        # handle 'lenght of overdue' holds
+        if conseq['Hold'] == -1:
+            conseq['Hold'] = length
+        return conseq
     
     def _ceil(self, idx):
         out = 0
@@ -457,25 +455,41 @@ class Repercussions:
                 out = limit
         return out
     
-    def _get_buckets(self):
-        type_buckets = []
+    def _get_bucket(self, resource_type):
 
-        for resource_type in self.alloc_types:
-            if 'reserve' in resource_type['path'].lower() and 'non-reserve' not in resource_type['path'].lower():
-                type_buckets.append('Reserve')
-            elif 'accessories' in resource_type['path'].lower():
-                type_buckets.append('Accessories')
-            else:
-                type_buckets.append('Non Accessory')
+        if 'reserve' in resource_type['path'].lower() and 'non-reserve' not in resource_type['path'].lower():
+            bucket = 'Reserve'
+        elif 'accessories' in resource_type['path'].lower():
+            bucket = 'Accessories'
+        else:
+            bucket = 'Non Accessory'
         
-        return type_buckets
+        return bucket
     
     def update(self):
-        buckets = self._get_buckets()
+        hold_lengths = []
+        overdue_count_holds = []
 
-        for bucket in buckets:
-            self.final_consequences['Hold'] += self._get(bucket)['Hold'] # items apply holds consecutively
-            self.final_consequences['Fee'] = True if self._get(bucket)['Fee'] or self.final_consequences['Fee'] else False
-            self.final_consequences['Registrar Hold'] = True if self._get(bucket)['Registrar Hold'] or self.final_consequences['Registrar Hold'] else False
-        
+        for overdue_length, resource_type in self.overdue_pairs:
+            if self.overdue_count:
+                self.overdue_count += 1
+                if self.overdue_count in (5, 10, 12):
+                    overdue_count_holds.append(self.resource_type_consequence_mapping['Overdue Count'][self.overdue_count])
+
+            hold_lengths.append(self._get(resource_type, overdue_length)['Hold'])
+
+            self.final_consequences['Fee'] = True if self._get(resource_type, overdue_length)['Fee'] or self.final_consequences['Fee'] else False
+            self.final_consequences['Registrar Hold'] = True if self._get(resource_type, overdue_length)['Registrar Hold'] or self.final_consequences['Registrar Hold'] else False
+
+        if -2 in overdue_count_holds:
+            self.final_consequences['Hold'] = -1
+        else:
+            for length in overdue_count_holds:
+                # sort so lowest length on bottom
+                hold_lengths.sort()
+                # replace lowest length with special case (if it's higher)
+                hold_lengths[0] = max(hold_lengths[0], length)
+
+        self.final_consequences['Hold'] = max(hold_lengths) # items apply holds consecutively
+
         return self.final_consequences

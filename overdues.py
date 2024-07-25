@@ -248,8 +248,8 @@ class Overdues:
             #     scheduled_end = policy_start_date
             overdue_length = (datetime.now(tz=tz) - scheduled_end).days
 
-            allocation_types = [item['rtype'] for item in allocation['items'] if item['action'].lower() == 'checkout']
-            consequences = Repercussions(overdue_length, allocation_types).update()
+            overdue_length_type_pairs = [(overdue_length, item['rtype']) for item in allocation['items'] if item['action'].lower() == 'checkout']
+            consequences = Repercussions(overdue_length, overdue_length_type_pairs).update()
 
             if allocation['oid'] not in excluded_checkouts:
                 if consequences['Hold'] and allocation['oid'] not in excluded_checkouts:
@@ -341,7 +341,8 @@ class Overdues:
             if allocation['oid'] not in excluded_checkouts:
                 self.logger.debug(f'Processing returned overdue allocation_oid: {allocation["oid"]}')
                 # retrieve policy consequences based on allocation items, types, and overdue length (planned incorporation of count here instead of in sql upserts)
-                conseq, end_time, checkout_center = self.utils.get_overdue_consequence(allocation)
+                overdue_count = self.db.one('SELECT count FROM overdues WHERE patron_oid = %(oid)s', oid=allocation['patron']['oid'])
+                conseq, end_time, checkout_center = self.utils.get_overdue_consequence(allocation, overdue_count)
                 # used to decriment fee_count and/or registrar_count in database if one is removed
                 fee_status, registrar_status = 0, 0
 
@@ -589,7 +590,8 @@ class Overdues:
 
                 # can use even for declared lost items since repercussions won't change after 6 months, so it doesn't matter the calculated amount will use the lost-returned date
                 alloc = self.connection.get_allocation(ck_oid, properties=['realEndTime', 'scheduledEndTime', 'realReturnTime', 'rtype', 'checkoutCenter'])['payload']
-                conseq, _, _ = self.utils.get_overdue_consequence(alloc)
+                overdue_count = self.db.one('SELECT count FROM overdues WHERE patron_oid = %(oid)s', oid=patron_oid)
+                conseq, _, _ = self.utils.get_overdue_consequence(alloc, overdue_count)
 
                 canned = CannedMessages(invoice_oid, self.connection, self.db).get_returned()
                 canned_subject, canned_description = canned['subject'], canned['description']
@@ -844,6 +846,7 @@ class Overdues:
             ### NOTE: Very similar to _process_fines
             # can use even for declared lost items since repercussions won't change after 6 months, so it doesn't matter the calculated amount will use the lost-returned date
             alloc = self.connection.get_allocation(alloc_oid, properties=['realEndTime', 'scheduledEndTime', 'realReturnTime', 'rtype', 'checkoutCenter', 'items'])['payload']
+            overdue_count = self.db.one('SELECT count FROM overdues WHERE patron_oid = %(oid)s', oid=patron_oid)
             conseq, _, _ = self.utils.get_overdue_consequence(alloc)
 
             with self.db.get_cursor() as cursor:
