@@ -285,8 +285,11 @@ class utils:
         
         return results
     
-    def get_overdue_consequence(self, allocation, overdue_count: int) -> tuple[dict, datetime, dict]:
-        alloc_end_time = datetime.strptime(allocation['realEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+    def get_overdue_consequence(self, allocation, overdue_count: int, end: datetime = None) -> tuple[dict, datetime, dict]:
+        if end:
+            alloc_end_time = end
+        else:
+            alloc_end_time = datetime.strptime(allocation['realEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
 
         scheduled_end = datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
         tz = timezone(timedelta(hours=-6), name='utc-6')

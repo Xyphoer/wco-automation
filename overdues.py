@@ -589,15 +589,9 @@ class Overdues:
                 date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
 
                 # can use even for declared lost items since repercussions won't change after 6 months, so it doesn't matter the calculated amount will use the lost-returned date
-                alloc = self.connection.get_allocation(ck_oid, properties=['realEndTime', 'scheduledEndTime', 'realReturnTime', 'rtype', 'checkoutCenter'])['payload']
+                alloc = self.connection.get_allocation(ck_oid, properties=['realEndTime', 'scheduledEndTime', 'realReturnTime', 'rtype', 'checkoutCenter', 'items'])['payload']
                 overdue_count = self.db.one('SELECT count FROM overdues WHERE patron_oid = %(oid)s', oid=patron_oid)
-                conseq, _, _ = self.utils.get_overdue_consequence(alloc, overdue_count)
-
-                canned = CannedMessages(invoice_oid, self.connection, self.db).get_returned()
-                canned_subject, canned_description = canned['subject'], canned['description']
-                person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName'])['payload']
-                ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], '', self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
-                self.rm_connection.email_patron(ticket['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], canned_description)
+                conseq, _, _ = self.utils.get_overdue_consequence(alloc, overdue_count, end=date_paid)
 
                 with self.db.get_cursor() as cursor:
                     ### NOTE: invoice must already be created for this, and thus count and hold_count are already up to date. Thus don't update
@@ -610,7 +604,7 @@ class Overdues:
                                             "THEN hold_length + '180D'::INTERVAL " \
                                         "WHEN count >= 5 " \
                                             "THEN hold_length + '90D'::INTERVAL " \
-                                        "ELSE hold_length + %(base_extended)s"
+                                        "ELSE hold_length + CAST('%(base_extended)sD' AS INTERVAL) "
                                     "END, " \
                                     "hold_remove_time = CASE " \
                                         "WHEN count >= 12 " \
@@ -625,12 +619,13 @@ class Overdues:
                                             "THEN (hold_remove_time + '90D'::INTERVAL)::TIMESTAMP " \
                                         "WHEN hold_remove_time < 'NOW'::TIMESTAMP OR hold_remove_time IS NULL" \
                                             "THEN %(paid_length)s::TIMESTAMP " \
-                                        "ELSE hold_remove_time + %(base_extended)s END " \
+                                        "ELSE hold_remove_time + CAST('%(base_extended)sD' AS INTERVAL) END " \
                                     "WHERE patron_oid = %(p_oid)s " \
                                     "RETURNING hold_remove_time, count",
                                                                     paid_date     = date_paid,
-                                                                    paid_length   = {date_paid + timedelta(days=conseq["Hold"])},
-                                                                    base_extended = f'{conseq["Hold"]}D::INTERVAL')
+                                                                    paid_length   = date_paid + timedelta(days=conseq["Hold"]),
+                                                                    base_extended = conseq["Hold"],
+                                                                    p_oid         = patron_oid)
                     back_hold_remove_time, overdues_count = cursor.fetchone() # gives datetime.datetime object for extended hold_remove time of sequential invoices
                 
                 hold_len = conseq["Hold"]
@@ -644,9 +639,18 @@ class Overdues:
                 self.db.run("UPDATE invoices SET " \
                                 "fee_status = false, " \
                                 "registrar_hold = false, " \
-                                "hold_length = %(hold_l)s" \
+                                "hold_length = CAST('%(hold_l)sD' AS INTERVAL), " \
                                 "hold_remove_time = %(hold_rtime)s::TIMESTAMP " \
                             "WHERE invoice_oid = %(i_oid)s", hold_l = hold_len, hold_rtime = back_hold_remove_time, i_oid = invoice_oid)
+
+                canned = CannedMessages(invoice_oid, self.connection, self.db, settled=date_paid.isoformat(sep=' ', timespec='seconds')).get_returned()
+                canned_subject, canned_description = canned['subject'], canned['description']
+                person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName'])['payload']
+                ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], '', self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
+                self.rm_connection.email_patron(ticket['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], canned_description)
+
+                if not invoice['isHold'] and conseq['Hold'] != 0:
+                    self.connection.apply_invoice_hold(invoice) # potentially not working -- investigate
 
     # remove holds on patrons who have reached the designated time of removal.
     # On new - by checkout - process
@@ -875,7 +879,7 @@ class Overdues:
                                         "THEN (hold_remove_time + '90D'::INTERVAL)::TIMESTAMP " \
                                     "WHEN hold_remove_time < 'NOW'::TIMESTAMP OR hold_remove_time IS NULL " \
                                         "THEN %(return_length)s::TIMESTAMP " \
-                                    "ELSE hold_remove_time + CAST('%(base_extended)s' AS INTERVAL) END " \
+                                    "ELSE hold_remove_time + CAST('%(base_extended)sD' AS INTERVAL) END " \
                                 "WHERE patron_oid = %(p_oid)s " \
                                 "RETURNING hold_remove_time, count",
                                                                 return_date   = date_back,
