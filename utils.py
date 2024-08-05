@@ -285,7 +285,7 @@ class utils:
         
         return results
     
-    def get_overdue_consequence(self, allocation, overdue_count: int, end: datetime = None) -> tuple[dict, datetime, dict]:
+    def get_overdue_consequence(self, allocation, overdue_count: int, end: datetime = None) -> tuple[dict, datetime, dict, int]:
         if end:
             alloc_end_time = end
         else:
@@ -300,15 +300,17 @@ class utils:
             overdue_length = end_time - scheduled_end
 
             # if allocation has a previously returned item that was returned not overdue, it's length would be 0, and no hold should be placed for it
-            if overdue_length.days > 0:
+            ## <1 day for normal items is the grace period. Alternatively, if it is a reserve item, 10 min grace period.
+            if overdue_length.days > 0 or ('reserve' in item['rtype']['path'].lower() and (overdue_length.seconds // 600) > 0):
                 length_type_pairs.append(overdue_length.days, item['rtype'])
         
         if length_type_pairs:
-            result = Repercussions(length_type_pairs, overdue_count).update()
+            result, new_overdue_count = Repercussions(length_type_pairs, overdue_count).update()
         else:
+            new_overdue_count = overdue_count
             result = {'Hold': 0, 'Fee': False, 'Registrar Hold': False}
 
-        return result, alloc_end_time, allocation['checkoutCenter']
+        return result, alloc_end_time, allocation['checkoutCenter'], new_overdue_count
 
     def get_overdue_checkout_emails(self, center, start_time, end_time):
         emails = []
@@ -475,6 +477,7 @@ class Repercussions:
 
         for overdue_length, resource_type in self.overdue_pairs:
             if self.overdue_count:
+                # update with current overdue count
                 self.overdue_count += 1
                 if self.overdue_count in (5, 10, 12):
                     overdue_count_holds.append(self.resource_type_consequence_mapping['Overdue Count'][self.overdue_count])
@@ -492,7 +495,6 @@ class Repercussions:
                 hold_lengths.sort()
                 # replace lowest length with special case (if it's higher)
                 hold_lengths[0] = max(hold_lengths[0], length)
+            self.final_consequences['Hold'] = sum(hold_lengths) # items apply holds consecutively
 
-        self.final_consequences['Hold'] = max(hold_lengths) # items apply holds consecutively
-
-        return self.final_consequences
+        return self.final_consequences, self.overdue_count
