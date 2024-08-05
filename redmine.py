@@ -352,7 +352,7 @@ class Texting(RedmineConnection):
             ##### temporary blocker for not processing InfoLabs who haven't asked for texting
             if center in ('college library', 'memorial library'):
 
-                self.logger.info(f"---{center}---\n")
+                self.logger.info(f"---{center}---")
 
                 phone_numbers = []
                 for checkout in self.location_checkout_pairs[center]:
@@ -388,7 +388,7 @@ class Texting(RedmineConnection):
                                 self.session.put(url=f'https://redmine.library.wisc.edu/issues/{result["id"]}.json',
                                                 json={'issue': {'status_id': self.statuses['Resolved'], 'notes': update_text}})
                                 
-                                self.logger.info(f'Ticket #{result["id"]} updated with:\n{update_text}\n')
+                                self.logger.info(f'Ticket #{result["id"]} updated with:\n{update_text}')
                             
                                 if not phone_number:
                                     curr_ticket = self.session.get(url=f'https://redmine.library.wisc.edu/issues/{result["id"]}.json').json()
@@ -432,7 +432,7 @@ class Texting(RedmineConnection):
         
                 phone_numbers.sort()
 
-                self.logger.info(", ".join(phone_numbers))
+                self.logger.info("\n" + ", ".join(phone_numbers))
                 self.logger.info(f"Total: {len(phone_numbers)}")
 
 
