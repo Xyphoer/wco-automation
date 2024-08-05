@@ -55,13 +55,13 @@ class Overdues:
         self._process_fines()
         self.logger.info("Processing current holds")
         self._remove_holds()
-        self.logging.info("Processing current overdues")
+        self.logger.info("Processing current overdues")
         self._process_current_overdues()
-        self.logging.info("Processing expirations")
+        self.logger.info("Processing expirations")
         self._process_expirations()
-        self.logging.info("Processing lost")
+        self.logger.info("Processing lost")
         self._process_lost()
-        self.logging.info("Processing registrar holds")
+        self.logger.info("Processing registrar holds")
         self._process_registrar_holds()
  
     def _connect_to_db(self, db_pass) -> Postgres:
@@ -203,7 +203,8 @@ class Overdues:
     def place_fee(self, invoice_oid: int, cost: int):
 
         if type(invoice_oid) == int:
-            invoice = self.connection.get_invoice(invoice_oid, properties=['payee'])['payload']
+            invoice = self.connection.get_invoice(invoice_oid, properties=['payee', 'checkoutCenter'])['payload']
+            self.connection.set_scope(invoice['checkoutCenter']['oid'], 'checkoutCenter')
             self.connection.add_charge(invoice, amount=cost, subtype="Loss", text="")
             
             patron_oid = self.db.one('SELECT patron_oid FROM invoices WHERE invoice_oid = %(i_oid)s', i_oid = invoice_oid)
@@ -250,7 +251,7 @@ class Overdues:
             overdue_length = (datetime.now(tz=tz) - scheduled_end).days
 
             overdue_length_type_pairs = [(overdue_length, item['rtype']) for item in allocation['items'] if item['action'].lower() == 'checkout']
-            consequences = Repercussions(overdue_length, overdue_length_type_pairs).update()
+            consequences, _ = Repercussions(overdue_length_type_pairs).update()
 
             if allocation['oid'] not in excluded_checkouts:
                 if consequences['Hold'] and allocation['oid'] not in excluded_checkouts:
@@ -447,7 +448,7 @@ class Overdues:
                                             "hold_remove_time = CASE " \
                                                 "WHEN %(hold_l_inf)s = 1 " \
                                                     "THEN NULL::TIMESTAMP " \
-                                                "WHEN hold_remove_time < 'NOW'::TIMESTAMP OR overdues.hold_remove_time IS NULL " \
+                                                "WHEN overdues.hold_remove_time < 'NOW'::TIMESTAMP OR overdues.hold_remove_time IS NULL " \
                                                     "THEN EXCLUDED.hold_remove_time " \
                                                 "ELSE overdues.hold_remove_time + EXCLUDED.hold_length " \
                                             "END, " \
@@ -463,7 +464,7 @@ class Overdues:
                                                                     i_id       = str({invoice_oid}) if invoice_oid else '{}',
                                                                     i_id_plain = invoice_oid if invoice_oid else -2,
                                                                     r_hold_c   = value[8]) # hold_rtime = value[4],
-                            back_hold_remove_time = cursor.fetchone() # gives datetime.datetime object for extended hold_remove time of sequential invoices
+                            back_hold_remove_time = cursor.fetchone()[0] # gives datetime.datetime object for extended hold_remove time of sequential invoices
                         
                         # add/update invoice entry in invoices db.
                         ## When updating:
@@ -490,7 +491,7 @@ class Overdues:
                                                                                                         hold_rtime = back_hold_remove_time,
                                                                                                         c_oid = key,
                                                                                                         p_oid = value[6]['patron']['oid'],
-                                                                                                        expire = back_hold_remove_time + timedelta(days = ((365 * 4) - hold_len)))
+                                                                                                        expire = back_hold_remove_time + timedelta(days = ((365 * 4) - value[3])))
                         # email only if invoice exists. This whole setup should be reworked
                         # if key not in current_hold_allocs:
                         #     if value[1] == 'True':
@@ -594,7 +595,7 @@ class Overdues:
                                                                     base_extended = conseq["Hold"],
                                                                     p_oid         = patron_oid,
                                                                     r_hold_c      = registrar_status)
-                    back_hold_remove_time = cursor.fetchone() # gives datetime.datetime object for extended hold_remove time of sequential invoices
+                    back_hold_remove_time = cursor.fetchone()[0] # gives datetime.datetime object for extended hold_remove time of sequential invoices
 
                 self.db.run("UPDATE invoices SET " \
                                 "count = %(count)s, " \
@@ -606,7 +607,7 @@ class Overdues:
                             "WHERE invoice_oid = %(i_oid)s", count = new_overdue_count - overdue_count,
                                                              hold_l = conseq["Hold"],
                                                              hold_rtime = back_hold_remove_time,
-                                                             expire = back_hold_remove_time + timedelta(days = ((365 * 4) - hold_len)),
+                                                             expire = back_hold_remove_time + timedelta(days = ((365 * 4) - conseq["Hold"])),
                                                              i_oid = invoice_oid)
 
                 canned = CannedMessages(invoice_oid, self.connection, self.db, settled=date_paid.isoformat(sep=' ', timespec='seconds')).get_returned()
@@ -624,7 +625,7 @@ class Overdues:
         now = datetime.now()
         holds_removed = {}
         invoice_oids = []
-
+        # potentially add checking of hold_remove_time with current time in query
         potential_holds = self.db.all('SELECT patron_oid, hold_length, hold_remove_time, invoice_oid FROM invoices WHERE hold_status AND NOT waived')
 
         for patron_oid, hold_length, hold_remove_time, invoice_oid in potential_holds:
@@ -877,7 +878,7 @@ class Overdues:
                                                                 r_hold_c = registrar_status,
                                                                 fine_count = fee_status,
                                                                 p_oid = patron_oid)
-                back_hold_remove_time = cursor.fetchone() # gives datetime.datetime object for extended hold_remove time of sequential invoices
+                back_hold_remove_time = cursor.fetchone()[0] # gives datetime.datetime object for extended hold_remove time of sequential invoices
 
             self.db.run("UPDATE invoices SET " \
                             "count = %(count)s, " \
@@ -890,7 +891,7 @@ class Overdues:
                         "WHERE invoice_oid = %(i_oid)s", count = new_overdue_count - overdue_count,
                                                          hold_l = conseq["Hold"],
                                                          hold_rtime = back_hold_remove_time,
-                                                         expire = back_hold_remove_time + timedelta(days = ((365 * 4) - hold_len)),
+                                                         expire = back_hold_remove_time + timedelta(days = ((365 * 4) - conseq["Hold"])),
                                                          i_oid = invoice_oid)
             
 

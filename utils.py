@@ -306,7 +306,7 @@ class utils:
             ## <1 day for normal items is the grace period. Alternatively, if it is a reserve item, 10 min grace period.
             if overdue_length.days > 0 or ('reserve' in item['rtype']['path'].lower() and (overdue_length.seconds // 600) > 0):
                 # truncate to days only
-                length_type_pairs.append(overdue_length.days, item['rtype'])
+                length_type_pairs.append((overdue_length.days, item['rtype']))
         
         if length_type_pairs:
             result, new_overdue_count = Repercussions(length_type_pairs, overdue_count).update()
@@ -480,7 +480,7 @@ class Repercussions:
         overdue_count_holds = []
 
         for overdue_length, resource_type in self.overdue_pairs:
-            if self.overdue_count:
+            if self.overdue_count != None:
                 # update with current overdue count
                 self.overdue_count += 1
                 if self.overdue_count in (5, 10, 12):

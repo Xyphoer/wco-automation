@@ -34,12 +34,13 @@ def check_wco_request(func):
             else:
                 module_logger.info(f'Suspected hold already removed')
                 module_logger.debug(e)
+                return response.json() ##### BAD PRACTICE -- rewrite later
 
         # check response is good again since WCO returns HTTP 200 whenever possible
         data = response.json()
 
         # check empty payload
-        if data['payload'] == None:
+        if data['payload'] == None and ('get' in data['uri'] or 'search' in data['uri']): # some don't have a payload but that's fine - limiting to 'get'/'search' for now
             err = requests.exceptions.HTTPError('404 - No Payload - Manually Thrown')
             module_logger.debug(f'Empty WebCheckout payload in {func.__name__} | request url: {response.url} | request body: {response.request.body}')
             module_logger.exception(err)

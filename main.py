@@ -5,6 +5,7 @@ from overdues import Overdues
 import argparse
 from datetime import datetime
 import logging
+import logging.config
 from os import path, mkdir
 
 # set up argparse
@@ -47,29 +48,72 @@ parser.add_argument('-log', '--log-level', type=int, choices=range(5), default=4
 
 args = parser.parse_args()
 
-log_dict = {0: logging.NOTSET, 1: logging.CRITICAL, 2: logging.ERROR,  3: logging.WARNING, 4: logging.INFO, 5: logging.DEBUG}
+log_dict = {0: 'NOTSET', 1: 'CRITICAL', 2: 'ERROR',  3: 'WARNING', 4: 'INFO', 5: 'DEBUG'}
+
+logging.config.dictConfig({
+    'version': 1,
+    'formatters': {
+        'basic': {
+            'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        }
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'level': log_dict[args.log_level],
+            'formatter': 'basic',
+            'stream': 'ext://sys.stdout'
+        },
+        'file': {
+            'class': 'logging.FileHandler',
+            'level': 'DEBUG',
+            'formatter': 'basic',
+            'filename': f'../logs/wco_automation[{datetime.now().strftime("%Y-%m-%d")}].log'
+        }
+    },
+    #  Alternate method of declaring root (higher priority)
+    # 'root': {
+    #     'level': 'NOTSET',
+    #     'handlers': ['console', 'file']
+    # },
+    'loggers': {
+        '': { # root
+            'level': 'NOTSET',
+            'handlers': ['console', 'file']
+        },
+        'overdues': {
+            'level': 'DEBUG'
+        },
+        'decorators': {
+            'level': 'DEBUG'
+        },
+        'redmine': {
+            'level': 'DEBUG'
+        }
+    }
+})
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+# logger.setLevel(logging.DEBUG)
 
-# file handler for all messages
-if not path.exists('../logs'):
-    mkdir('../logs')
-fh = logging.FileHandler(f'../logs/wco_automation[{datetime.now().strftime("%Y-%m-%d")}].log')
-fh.setLevel(logging.DEBUG)
+# # file handler for all messages
+# if not path.exists('../logs'):
+#     mkdir('../logs')
+# fh = logging.FileHandler(f'../logs/wco_automation[{datetime.now().strftime("%Y-%m-%d")}].log')
+# fh.setLevel(logging.DEBUG)
 
-# console handler for user desired messages
-sh = logging.StreamHandler()
-sh.setLevel(log_dict[args.log_level])
+# # console handler for user desired messages
+# sh = logging.StreamHandler()
+# sh.setLevel(log_dict[args.log_level])
 
-# basic readable formatter for both outputs
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-fh.setFormatter(formatter)
-sh.setFormatter(formatter)
+# # basic readable formatter for both outputs
+# formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# fh.setFormatter(formatter)
+# sh.setFormatter(formatter)
 
-# attach handlers to logger
-logger.addHandler(fh)
-logger.addHandler(sh)
+# # attach handlers to logger
+# logger.addHandler(fh)
+# logger.addHandler(sh)
 
 # get login info
 wco_host = ''
