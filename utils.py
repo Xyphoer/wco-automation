@@ -296,12 +296,16 @@ class utils:
 
         length_type_pairs = []
         for item in allocation['items']:
-            end_time = datetime.strptime(item['realReturnTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+            if end:
+                end_time = end
+            else:
+                end_time = datetime.strptime(item['realReturnTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
             overdue_length = end_time - scheduled_end
 
             # if allocation has a previously returned item that was returned not overdue, it's length would be 0, and no hold should be placed for it
             ## <1 day for normal items is the grace period. Alternatively, if it is a reserve item, 10 min grace period.
             if overdue_length.days > 0 or ('reserve' in item['rtype']['path'].lower() and (overdue_length.seconds // 600) > 0):
+                # truncate to days only
                 length_type_pairs.append(overdue_length.days, item['rtype'])
         
         if length_type_pairs:

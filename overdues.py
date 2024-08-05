@@ -6,6 +6,7 @@ from postgres.cursors import TooMany
 from datetime import datetime, timedelta, timezone
 from utils import utils, Repercussions
 from os import system, chdir, getcwd
+from re import search as re_search
 
 module_logger = logging.getLogger(__name__)
 
@@ -1007,6 +1008,27 @@ class Overdues:
             self.rm_connection.email_patron(ticket['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], description)
             self.logger.info(f"Email for registrar changes: {ticket['helpdesk_ticket']['id']}")
     
+    def check_for_registrar_holds(self, file_name):
+        patron_barcodes = {}
+        with open(file_name, 'r') as in_file:
+            for line in in_file.readlines():
+                barcode = re_search(r'\d+', line)
+                if barcode:
+                    patron_barcodes[barcode.group()] = line
+        registrar_hold_oids = self.db.all('SELECT patron_oid FROM overdues WHERE registrar_hold_count > 0')
+        self.logger.info(f'Verifying registrar holds against: {file_name}')
+        self.logger.info('Patrons with database registrar holds:')
+        for oid in registrar_hold_oids:
+            patron = self.connection.get_patron(oid, properties = ['barcode', 'name'])['payload']
+            self.logger.info(f'Patron {patron["name"]} - ({patron["barcode"]})')
+            if patron['barcode'] in patron_barcodes.keys():
+                self.logger.debug(f'Matched {patron["name"]} - ({patron["barcode"]})')
+                del patron_barcodes[patron['barcode']]
+            else:
+                self.logger.info(f"No match for database registrar hold on {patron['name']} - ({patron['barcode']})")
+        for barcode, name in patron_barcodes.items():
+            self.logger.info(f"No match for input registrar hold on {name} - ({barcode})")
+
     # checks that all waived invoices (with a hold) have been properly waived in WCO
     def check_waived_invoices(self):
         invoice_oids = self.db.all("SELECT invoice_oid FROM invoices WHERE hold_status AND waived")
