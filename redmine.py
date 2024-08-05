@@ -4,6 +4,9 @@ from connection import Connection
 from datetime import datetime, timezone, timedelta
 from postgres import Postgres
 from decorators import check_request
+import logging
+
+module_logger = logging.getLogger(__name__)
 
 class RedmineConnection:
 
@@ -333,6 +336,7 @@ class Texting(RedmineConnection):
         super().__init__(*args, **kwargs)
         self.location_options = self.wco_connection.centers.keys()
         self.location_checkout_pairs = {}
+        self.logger = logging.getLogger(module_logger.name + ".Texting")
 
     def add_checkout(self, location, checkout):
         try:
@@ -348,7 +352,7 @@ class Texting(RedmineConnection):
             ##### temporary blocker for not processing InfoLabs who haven't asked for texting
             if center in ('college library', 'memorial library'):
 
-                print(f"---{center}---\n")
+                self.logger.info(f"---{center}---\n")
 
                 phone_numbers = []
                 for checkout in self.location_checkout_pairs[center]:
@@ -364,7 +368,7 @@ class Texting(RedmineConnection):
                         phone_number = "+1" + "".join(re.findall(r'\d+', self.search_phone(checkout['patron']['name'], checkout['patronPreferredEmail'])))
 
                         if not phone_number:
-                            print(f"Could not find phone number for {checkout['uniqueId']} - {checkout['patron']['name']} | skipping text.")
+                            self.logger.info(f"Could not find phone number for {checkout['uniqueId']} - {checkout['patron']['name']} | skipping text.")
                             # move to next checkout
                             continue
                             
@@ -384,7 +388,7 @@ class Texting(RedmineConnection):
                                 self.session.put(url=f'https://redmine.library.wisc.edu/issues/{result["id"]}.json',
                                                 json={'issue': {'status_id': self.statuses['Resolved'], 'notes': update_text}})
                                 
-                                print(f'Ticket #{result["id"]} updated with:\n{update_text}\n')
+                                self.logger.info(f'Ticket #{result["id"]} updated with:\n{update_text}\n')
                             
                                 if not phone_number:
                                     curr_ticket = self.session.get(url=f'https://redmine.library.wisc.edu/issues/{result["id"]}.json').json()
@@ -424,12 +428,12 @@ class Texting(RedmineConnection):
                         
                         #print(new_ticket.json())
                         
-                        print(f'Ticket #{new_ticket["helpdesk_ticket"]["id"]} for {checkout["patron"]["name"]} created.')
+                        self.logger.info(f'Ticket #{new_ticket["helpdesk_ticket"]["id"]} for {checkout["patron"]["name"]} created.')
         
                 phone_numbers.sort()
 
-                print(", ".join(phone_numbers))
-                print(f"Total: {len(phone_numbers)}")
+                self.logger.info(", ".join(phone_numbers))
+                self.logger.info(f"Total: {len(phone_numbers)}")
 
 
 # possibly explore better methods

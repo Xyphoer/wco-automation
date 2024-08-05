@@ -171,7 +171,7 @@ class Dos:
                 issue_file = file
 
         if issue_file == "":
-            print("Could not find issues file.")
+            logger.info("Could not find issues file.")
 
         if issue_file != "":
             with open(issue_file, newline='') as file:
@@ -191,7 +191,7 @@ class Dos:
                 if self.connection.get_checkout(allocation[1])['payload']['result'][0]['state'] == 'CHECKOUT':
                     allocations.remove(allocation)
                 else:
-                    print(allocation[1])
+                    logger.info(allocation[1])
             
             if len(allocations):
                 in_browser = input("Open redmine tickets? (y/n): ")
@@ -220,7 +220,7 @@ class Dos:
         # begin output loop
         for location in overdues:
             # ouput current checkout center
-            print(">>>>>" + location)
+            logger.info(">>>>>" + location)
             for checkout in overdues[location]:
                 # get the scheduled end time of the checkout and format into an appropriate comparable for time_now
                 timestamp = checkout['scheduledEndTime']
@@ -235,13 +235,13 @@ class Dos:
                     start_time = start_time.strftime("%m/%d/%Y - %I:%M:%S %p  tz: %z")
 
                     # output checkout information
-                    print(f"Checkout: {checkout['name']}\n" \
+                    logger.info(f"Checkout: {checkout['name']}\n" \
                           f"Patron: {checkout['patron']['name']}\n" \
                           f"Item(s): {', '.join(checkout['itemNames'])}\n" \
                           f"Start Time: {start_time}\n" \
                           f"WCO link: https://uwmadison.webcheckout.net/sso/wco?method=show-entity&type=allocation&oid={checkout['oid']}\n\n")
         
-        print(f"Total overdue: {overdue_amount}")
+        logger.info(f"Total overdue: {overdue_amount}")
 
     #####
     # Name: get_dos
@@ -272,7 +272,7 @@ class utils:
                 serials = infile.read().split()
 
         except (FileNotFoundError, PermissionError) as err:
-            print(err)
+            logger.info(err)
 
         if serials:        
             for response, serial in zip(self.connection.get_items_by_serial(serials), serials):
@@ -324,7 +324,7 @@ class utils:
             if timestamp_formatted > start_formatted and timestamp_formatted < end_formatted:
                 emails.append(checkout['patronPreferredEmail'])
         
-        print(', '.join(emails))
+        logger.info(', '.join(emails))
     
     def get_checkout_emails(self, start_time: datetime):
         emails = {}

@@ -221,7 +221,7 @@ class Overdues:
 
             return invoice
         else:
-            print(f"Could not place fee with invoice_oid: {invoice_oid}")  # clean to actually use wco responses to determine
+            self.logger.info(f"Could not place fee with invoice_oid: {invoice_oid}")  # clean to actually use wco responses to determine
     
     # get all current overdues and apply holds (if >1day or reserve) and update DB -- DONE: NEED TEST
     # On new - by checkout - process
@@ -273,13 +273,13 @@ class Overdues:
                         try:
                             self.texting.add_checkout(allocation['checkoutCenter']['name'], allocation)
                         except Exception as e:
-                            print("Error adding checkout to texting:", e)
+                            self.logger.info("Error adding checkout to texting:", e)
 
                     else:
                         invoice_oids = self.db.all('SELECT invoice_oid FROM invoices WHERE ck_oid=%(id)s AND NOT waived', id=allocation['oid'])
                         invoice_oid = invoice_oids[0]
                         if len(invoice_oids) > 1:
-                            print(f'checkout {allocation["oid"]} has multiple invoices, proceeding with {invoice_oid}')
+                            self.logger.info(f'checkout {allocation["oid"]} has multiple invoices, proceeding with {invoice_oid}')
                     if consequences['Fee']:
                         if allocation['oid'] not in current_fine_allocs:  # only one fee per invoice
                             charge = allocation['aggregateValueOut'] if allocation['aggregateValueOut'] else 2000 # value of checked out items only
@@ -288,10 +288,10 @@ class Overdues:
                             try:
                                 self.texting.add_checkout(allocation['checkoutCenter']['name'], allocation)
                             except Exception as e:
-                                print("Error adding checkout to texting:", e)
+                                self.logger.info("Error adding checkout to texting:", e)
 
                             if not fee_placed:
-                                print(f"No fee placed on person with oid:{patron_oid}")
+                                self.logger.info(f"No fee placed on person with oid:{patron_oid}")
                         if consequences['Registrar Hold'] and allocation['oid'] not in current_registrar_holds:
                             # if this is their first registrar hold
                             if self.db.one("SELECT registrar_hold_count FROM overdues WHERE patron_oid = %(p_id)s", p_id = patron_oid) == 0:
@@ -303,7 +303,7 @@ class Overdues:
 
                                 self.session_registrar_changes.append((1, person['name'], person['barcode'], ticket['helpdesk_ticket']['id']))
 
-                                print(f'Registrar Hold placed for: {person["oid"]} -- {person["name"]} - ({person["barcode"]})')
+                                self.logger.info(f'Registrar Hold placed for: {person["oid"]} -- {person["name"]} - ({person["barcode"]})')
                                 
                             self.db.run("UPDATE invoices SET registrar_hold = True WHERE invoice_oid = %(i_id)s", i_id = invoice_oid)
                             self.db.run("UPDATE overdues SET registrar_hold_count = registrar_hold_count + 1 WHERE patron_oid = %(p_id)s", p_id = patron_oid)
@@ -311,7 +311,7 @@ class Overdues:
         try:
             self.texting.ticketify()
         except Exception as e:
-            print(e)
+            self.logger.info(e)
 
         return
 
@@ -574,7 +574,7 @@ class Overdues:
             if invoice['datePaid']:
 
                 person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName', 'name', 'barcode'])['payload']
-                print(f"Patron oid: {patron_oid} -- paid fine -- {person['name']} - ({person['barcode']}) -- Return & Delete item") # can do automatically
+                self.logger.info(f"Patron oid: {patron_oid} -- paid fine -- {person['name']} - ({person['barcode']}) -- Return & Delete item") # can do automatically
                 if self.db.one("SELECT registrar_hold_count FROM overdues WHERE patron_oid = %(p_id)s", p_id = patron_oid) == 1:
                     canned = CannedMessages(invoice_oid, self.connection, self.db).canned_registrar_removed
                     canned_subject, canned_description = canned['subject'], canned['description']
@@ -584,7 +584,7 @@ class Overdues:
 
                     self.session_registrar_changes.append((0, person['name'], person['barcode'], ticket['helpdesk_ticket']['id']))
 
-                    print(f"Patron oid: {patron_oid} -- paid fine -- {person['name']} - ({person['barcode']}) -- Removed Registrar Hold")
+                    self.logger.info(f"Patron oid: {patron_oid} -- paid fine -- {person['name']} - ({person['barcode']}) -- Removed Registrar Hold")
 
                 date_paid = datetime.strptime(invoice['datePaid'], '%Y-%m-%dT%H:%M:%S.%f%z')
 
@@ -795,7 +795,7 @@ class Overdues:
                     for item in alloc['payload']['items']:
                         rem = self.connection.delete_resource(item['resource']['oid'])
                         if type(rem) == str:
-                            print(alloc['payload']['oid'], rem)
+                            self.logger.info(alloc['payload']['oid'], rem)
 
                         item_text = ', '.join([str(item['resource']['oid']),
                                             item['name'],
@@ -832,7 +832,7 @@ class Overdues:
                                                                   contact_email=email)
                         self.rm_connection.email_patron(ticket['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], csv_header + location_emails[center][1]['description'])
 
-            print("Lost csv record created at: ", f"../Lost Logs/Lost Items {file_name_time}.csv")
+            self.logger.info("Lost csv record created at: ", f"../Lost Logs/Lost Items {file_name_time}.csv")
         
         # maybe do resources instead of full checkouts?
         allocations = input("Lost Returned allocations (whitespace seperation): ")
@@ -910,7 +910,7 @@ class Overdues:
                 canned_subject, canned_description = canned['subject'], canned['description']
                 person = self.connection.get_patron(patron_oid, ['email', 'firstName', 'lastName', 'name', 'barcode'])['payload']
 
-                print(f"Patron oid: {patron_oid} -- returned lost item -- {person['name']} - ({person['barcode']}) -- Removed Registrar Hold")
+                self.logger.info(f"Patron oid: {patron_oid} -- returned lost item -- {person['name']} - ({person['barcode']}) -- Removed Registrar Hold")
 
                 ticket = self.rm_connection.create_ticket(canned_subject, person['email'], person['firstName'], person['lastName'], '', self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
                 self.rm_connection.email_patron(ticket['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], canned_description)
@@ -1029,7 +1029,7 @@ class Overdues:
                                                     '',
                                                     self.rm_connection.statuses['Resolved'], self.rm_connection.project_id)
             self.rm_connection.email_patron(ticket['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], description)
-            print(f"Email for registrar changes: {ticket['helpdesk_ticket']['id']}")
+            self.logger.info(f"Email for registrar changes: {ticket['helpdesk_ticket']['id']}")
     
     # checks that all waived invoices (with a hold) have been properly waived in WCO
     def check_waived_invoices(self):
@@ -1071,7 +1071,7 @@ class Overdues:
         for ck_oid in ck_oids:
             ck = self.connection.get_allocation(ck_oid, ['allocationState'])['payload']
             if ck['allocationState'] == 'CHECKOUT-COMPLETED':
-                print(ck['name'], ck_oid)
+                self.logger.info(ck['name'], ck_oid)
 
     # balance invoice and overdues databases
     # reconciling hold_length, hold_remove_time, hold_status, fee_status, and registrar_hold
@@ -1124,7 +1124,7 @@ class Overdues:
                 try:
                     db_open_invoices_MUTABLE.remove(invoice['payee']['oid'])
                 except ValueError as e:
-                    print(f"Patron: {invoice['payee']['name']} has two holds.")
+                    self.logger.info(f"Patron: {invoice['payee']['name']} has two holds.")
             else:
                 wco_open_invoices_MUTABLE.append(invoice['payee']['oid'])
         

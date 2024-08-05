@@ -126,7 +126,7 @@ wco_connection = Connection(wco_userid, wco_password, wco_host)
 
 try:
     if args.dupe_checkouts:
-        print("Checking for duplicate checkouts across locations...\n")
+        logger.info("Checking for duplicate checkouts across locations...\n")
 
         # get all currently active checkouts
         checkouts = wco_connection.get_checkouts()
@@ -139,18 +139,18 @@ try:
 
         # output patron info
         for patron in dupe_patrons:
-            print(f"Name: {patron['payload']['name']}\n" +
+            logger.info(f"Name: {patron['payload']['name']}\n" +
                   f"oid: {patron['payload']['oid']}\n" +
                   f"barcode: {patron['payload']['barcode']}\n\n")
         
     if args.open_fines:
-        print("Checking for patrons with open fines...\n")
+        logger.info("Checking for patrons with open fines...\n")
 
         # create Fines object
         fines = Fines(wco_connection)
 
         # output results of searching for open fines
-        print(fines.search_open())
+        logger.info(fines.search_open())
 
     if args.check_dos or args.overdues:
 
@@ -158,23 +158,23 @@ try:
         dos = Dos(wco_connection)
 
         if args.check_dos:
-            print("Checking for DoS patrons with returned items...\n")
+            logger.info("Checking for DoS patrons with returned items...\n")
 
             dos.check_dos()
 
         if args.overdues:
-            print("Checking for overdue checkouts...\n")
+            logger.info("Checking for overdue checkouts...\n")
 
             dos.get_overdues()
     
     if args.serial_search:
-        print("Performing search by serial numbers...\n")
+        logger.info("Performing search by serial numbers...\n")
 
         utils = utils(wco_connection)
 
         ss_results_list = utils.search_by_serial(args.serial_search)
 
-        print("\n".join(ss_results_list))
+        logger.info("\n".join(ss_results_list))
     
     # depricated
     if args.redmine_update:
@@ -200,7 +200,7 @@ try:
         # rm_connection.process_new_overdues(start=args.redmine_update[0], end=args.redmine_update[1], centers=args.redmine_update[2:])
     
     if args.checkout_emails:
-        print(f"Getting emails for open checkouts from {args.checkout_emails[0]} to {args.checkout_emails[1]} at center: {args.checkout_emails[2]}...\n")
+        logger.info(f"Getting emails for open checkouts from {args.checkout_emails[0]} to {args.checkout_emails[1]} at center: {args.checkout_emails[2]}...\n")
 
         utils = utils(wco_connection)
 
