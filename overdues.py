@@ -50,19 +50,40 @@ class Overdues:
     
     def update(self, start_time: str, end_time: str = '') -> dict:
         self.logger.info("Processing returned overdues")
-        self._process_returned_overdues(start_time, end_time)
+        try:
+            self._process_returned_overdues(start_time, end_time)
+        except Exception as e:
+            self.logger.info('Failed with error ' + e)
         self.logger.info("Processing current fines")
-        self._process_fines()
+        try:
+            self._process_fines()
+        except Exception as e:
+            self.logger.info('Failed with error ' + e)
         self.logger.info("Processing current holds")
-        self._remove_holds()
+        try:
+            self._remove_holds()
+        except Exception as e:
+            self.logger.info('Failed with error ' + e)
         self.logger.info("Processing current overdues")
-        self._process_current_overdues()
+        try:
+            self._process_current_overdues()
+        except Exception as e:
+            self.logger.info('Failed with error ' + e)
         self.logger.info("Processing expirations")
-        self._process_expirations()
+        try:
+            self._process_expirations()
+        except Exception as e:
+            self.logger.info('Failed with error ' + e)
         self.logger.info("Processing lost")
-        self._process_lost()
+        try:
+            self._process_lost()
+        except Exception as e:
+            self.logger.info('Failed with error ' + e)
         self.logger.info("Processing registrar holds")
-        self._process_registrar_holds()
+        try:
+            self._process_registrar_holds()
+        except Exception as e:
+            self.logger.info('Failed with error ' + e)
  
     def _connect_to_db(self, db_pass) -> Postgres:
         # check if db running
@@ -583,7 +604,7 @@ class Overdues:
                                     "hold_remove_time = CASE " \
                                         "WHEN %(base_extended)s = -1 " \
                                             "THEN NULL::TIMESTAMP " \
-                                        "WHEN hold_remove_time < 'NOW'::TIMESTAMP OR hold_remove_time IS NULL" \
+                                        "WHEN hold_remove_time < 'NOW'::TIMESTAMP OR hold_remove_time IS NULL " \
                                             "THEN %(paid_length)s::TIMESTAMP " \
                                         "ELSE hold_remove_time + CAST('%(base_extended)sD' AS INTERVAL) END, " \
                                     "registrar_hold_count = registrar_hold_count - %(r_hold_c)s " \

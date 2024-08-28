@@ -365,7 +365,10 @@ class Texting(RedmineConnection):
                         phone_number = "+1" + "".join(re.findall(r'\d+', checkout['note']))
                         phone_numbers.append(phone_number[0:12] if len(phone_number) > 12 else phone_number)
                     else:
-                        phone_number = "+1" + "".join(re.findall(r'\d+', self.search_phone(checkout['patron']['name'], checkout['patronPreferredEmail'])))
+                        try:
+                            phone_number = "+1" + "".join(re.findall(r'\d+', self.search_phone(checkout['patron']['name'], checkout['patronPreferredEmail'])))
+                        except:
+                            self.logger.debug(checkout['patron']['name'] + ' | phone number not found')
 
                         if not phone_number:
                             self.logger.info(f"Could not find phone number for {checkout['uniqueId']} - {checkout['patron']['name']} | skipping text.")
@@ -404,7 +407,11 @@ class Texting(RedmineConnection):
 
                                         phone_number = "+1" + number
 
-                                        phone_numbers[-1] = phone_number
+                                        ###### TEMP FIX -- INVSTIGATE (see 2024-08-07 log)
+                                        try:
+                                            phone_numbers[-1] = phone_number
+                                        except:
+                                            phone_numbers = [phone_number]
                                 found = True
                                 break
 

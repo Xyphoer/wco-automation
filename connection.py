@@ -245,7 +245,7 @@ class Connection:
     
     @check_wco_request
     def delete_resource(self, resource_oid: int):
-        delete_check = self.get_resource(resource_oid, ['deletable', 'deleted']).json()
+        delete_check = self.get_resource(resource_oid, ['deletable', 'deleted'])
         deletable, deleted = delete_check['payload']['deletable'], delete_check['payload']['deleted']
 
         # make more consistent return
