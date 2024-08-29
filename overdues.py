@@ -53,37 +53,37 @@ class Overdues:
         try:
             self._process_returned_overdues(start_time, end_time)
         except Exception as e:
-            self.logger.info('Failed with error ' + e)
+            self.logger.info(f'Failed with error {e}')
         self.logger.info("Processing current fines")
         try:
             self._process_fines()
         except Exception as e:
-            self.logger.info('Failed with error ' + e)
+            self.logger.info(f'Failed with error {e}')
         self.logger.info("Processing current holds")
         try:
             self._remove_holds()
         except Exception as e:
-            self.logger.info('Failed with error ' + e)
+            self.logger.info(f'Failed with error {e}')
         self.logger.info("Processing current overdues")
         try:
             self._process_current_overdues()
         except Exception as e:
-            self.logger.info('Failed with error ' + e)
+            self.logger.info(f'Failed with error {e}')
         self.logger.info("Processing expirations")
         try:
             self._process_expirations()
         except Exception as e:
-            self.logger.info('Failed with error ' + e)
+            self.logger.info(f'Failed with error {e}')
         self.logger.info("Processing lost")
         try:
             self._process_lost()
         except Exception as e:
-            self.logger.info('Failed with error ' + e)
+            self.logger.info(f'Failed with error {e}')
         self.logger.info("Processing registrar holds")
         try:
             self._process_registrar_holds()
         except Exception as e:
-            self.logger.info('Failed with error ' + e)
+            self.logger.info(f'Failed with error {e}')
  
     def _connect_to_db(self, db_pass) -> Postgres:
         # check if db running
@@ -624,7 +624,7 @@ class Overdues:
                                 "registrar_hold = false, " \
                                 "hold_length = CAST('%(hold_l)sD' AS INTERVAL), " \
                                 "hold_remove_time = %(hold_rtime)s::TIMESTAMP, " \
-                                "expiration = CAST(%(expire)s AS TIMESTAMP " \
+                                "expiration = CAST(%(expire)s AS TIMESTAMP) " \
                             "WHERE invoice_oid = %(i_oid)s", count = new_overdue_count - overdue_count,
                                                              hold_l = conseq["Hold"],
                                                              hold_rtime = back_hold_remove_time,
@@ -834,9 +834,7 @@ class Overdues:
             for resource in resources:
                 self.connection.undelete_resource(resource['resource']['oid'])
 
-            registrar_status = 0
-            if registrar_hold:
-                registrar_status = 1
+            registrar_status = int(registrar_hold)
 
             fee_status = 0
             if self.db.one("SELECT fee_status FROM invoices WHERE ck_oid = %(alloc_oid)s", alloc_oid = alloc_oid):
@@ -871,7 +869,7 @@ class Overdues:
             # can use even for declared lost items since repercussions won't change after 6 months, so it doesn't matter the calculated amount will use the lost-returned date
             alloc = self.connection.get_allocation(alloc_oid, properties=['realEndTime', 'scheduledEndTime', 'realReturnTime', 'rtype', 'checkoutCenter', 'items'])['payload']
             overdue_count = self.db.one('SELECT count FROM overdues WHERE patron_oid = %(oid)s', oid=patron_oid)
-            conseq, _, _, new_overdue_count = self.utils.get_overdue_consequence(alloc)
+            conseq, _, _, new_overdue_count = self.utils.get_overdue_consequence(alloc, overdue_count)
 
             with self.db.get_cursor() as cursor:
                 ### NOTE: invoice must already be created for this, and thus count and hold_count are already up to date. Thus don't update
