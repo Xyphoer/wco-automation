@@ -53,37 +53,37 @@ class Overdues:
         try:
             self._process_returned_overdues(start_time, end_time)
         except Exception as e:
-            self.logger.info(f'Failed with error {e}')
+            self.logger.exception(f'Failed with error {e}')
         self.logger.info("Processing current fines")
         try:
             self._process_fines()
         except Exception as e:
-            self.logger.info(f'Failed with error {e}')
+            self.logger.exception(f'Failed with error {e}')
         self.logger.info("Processing current holds")
         try:
             self._remove_holds()
         except Exception as e:
-            self.logger.info(f'Failed with error {e}')
+            self.logger.exception(f'Failed with error {e}')
         self.logger.info("Processing current overdues")
         try:
             self._process_current_overdues()
         except Exception as e:
-            self.logger.info(f'Failed with error {e}')
+            self.logger.exception(f'Failed with error {e}')
         self.logger.info("Processing expirations")
         try:
             self._process_expirations()
         except Exception as e:
-            self.logger.info(f'Failed with error {e}')
+            self.logger.exception(f'Failed with error {e}')
         self.logger.info("Processing lost")
         try:
             self._process_lost()
         except Exception as e:
-            self.logger.info(f'Failed with error {e}')
+            self.logger.exception(f'Failed with error {e}')
         self.logger.info("Processing registrar holds")
         try:
             self._process_registrar_holds()
         except Exception as e:
-            self.logger.info(f'Failed with error {e}')
+            self.logger.exception(f'Failed with error {e}')
  
     def _connect_to_db(self, db_pass) -> Postgres:
         # check if db running
