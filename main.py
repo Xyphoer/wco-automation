@@ -45,6 +45,16 @@ parser.add_argument('-log', '--log-level', type=int, choices=range(5), default=4
                     help="""Details how much info should be displayed. The higher, the more info.
                     Each number includes everything from the numbers prior.
                     0: No info  1: Critical Errors  2: Errors  3: Warnings  4: Info  5: Debug""")
+parser.add_argument('-auto', '--auto-run', action = 'store_true',
+                    help = "Temporary basic implementation of automatic running. Will run overdues ('-o'/'--overdues') hourly, on the hour." \
+                        "When waiting for ")
+## queues and threading | start a thread for overdues
+### On the main thread, hold an input (maybe eventually menu) in the main thread. Use this to add excluded checkouts, lost checkouts, etc. to a Queue.
+### From this queue, before each run of overdues, process any excluded, lost, etc. into it, and mark the queue item as done.
+### Also use the queue to end the repeated running of overdues
+### determine differences by a code and then info regarding it (dict, tuple?) being added to the queue.
+### A while loop is sufficient for the main thread menu, there is no need to use queue joining currently (except when an order to end has been given, to ensure that the 
+####    overall overdues run is completed. A queue join AND thread join should probably be used (just in case the queue is empty))
 
 args = parser.parse_args()
 
