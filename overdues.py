@@ -29,7 +29,7 @@ class Overdues:
         self.register_changes_name_last=''
 
         chdir(self.home)
-        with open('config.txt', 'r') as config: # can be bad if not calling from program directory. Make un-ambiguous
+        with open('config.ini', 'r') as config: # can be bad if not calling from program directory. Make un-ambiguous
             for line in config:
                 if "register_changes_email" in line.lower():
                     self.register_changes_email = line.split("=", maxsplit=1)[1].strip()
@@ -86,17 +86,39 @@ class Overdues:
             self.logger.exception(f'Failed with error {e}')
  
     def _connect_to_db(self, db_pass) -> Postgres:
+        """Faciliate the connection to the database.
+
+        Positional arguments:
+        db_pass -- the pasword to the database with username 'postgres'
+
+        Config requirements:
+        "db_location" = path to database (using /)
+
+        Returns:
+        Postgres -- returns the database postgres.Postgres object if successful
+        
+        Raises an OSError if unable to connect to the database.
+        """
         # check if db running
         response, start = -1, -1
         db = None
 
-        # hardcoded db address, add configuralable to config later
-        chdir('C:/Program Files/PostgreSQL/16/bin')
-        response = system('pg_ctl status -D "C:/Program Files/PostgreSQL/16/data"')
+        # retrieve database location
+        with open('config.ini', 'r') as config:
+            for line in config.readlines():
+                if 'db_location' in line.lower():
+                    db_location = line.split('=', maxsplit=1)[1].strip()
+                else:
+                    err = FileNotFoundError(f'No database location provided in "config.ini" -- key is "db_location"')
+                    self.logger.exception(err)
+                    raise err
+        
+        chdir(f"{db_location}/bin")
+        response = system(f'pg_ctl status -D "{db_location}/data"')
         if response != 0: # is not running == 3
-            start = system('pg_ctl start -w -D "C:/Program Files/PostgreSQL/16/data"')
+            start = system(f'pg_ctl start -w -D "{db_location}/data"')
             if start != 0: # failed to start
-                err = OSError('Failed to connected to database at "C:/Program Files/PostgreSQL/16/data"')
+                err = OSError(f'Failed to connected to database at "{db_location}/data"')
                 self.logger.exception(err)
                 raise err
         
@@ -687,7 +709,7 @@ class Overdues:
         if lost_overdues:
             self.logger.debug(f'New lost overdues: {lost_overdues}')
             # read emails to contact for location specific lost items
-            with open('config.txt', 'r') as config:
+            with open('config.ini', 'r') as config:
                 for line in config:
                     if "ebling_contact" in line.lower():
                         ebling_contact = line.split("=", maxsplit=1)[1].strip().split()
