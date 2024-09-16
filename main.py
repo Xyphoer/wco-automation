@@ -135,7 +135,7 @@ project_query_ext = ''
 postgres_pass = ''
 
 try:
-    with open('config.txt', 'r', encoding='utf-8') as in_file:
+    with open('config.ini', 'r', encoding='utf-8') as in_file:
         for line in in_file:
             if "wco_host" in line.lower():
                 wco_host = line.split("=", maxsplit=1)[1].strip()
