@@ -477,7 +477,7 @@ class Overdues:
                                             "registrar_hold_count = overdues.registrar_hold_count - %(r_hold_c)s " \
                                         "RETURNING hold_remove_time",
                                                                     oid        = value[6]['patron']['oid'],
-                                                                    i_count    = value[0],
+                                                                    i_count    = value[0] + overdue_count,  # new total = new extra + old total
                                                                     hold_c     = 1 if value[1]=='True' else 0,
                                                                     fee_c      = value[7],
                                                                     hold_l     = 0 if value[3] == -1 else value[3],
@@ -681,8 +681,11 @@ class Overdues:
         year_now = now.year
         prev_lost = self.db.all(f"SELECT invoice_oid, ck_oid FROM invoices WHERE overdue_lost AND overdue_start_time < CAST('01-01-{year_now}' AS TIMESTAMP)")
 
+        lost_overdues.append(self.db.one("SELECT invoice_oid, ck_oid FROM invoices WHERE invoice_oid = 147394063"))
+
         # only make file if new lost overdues
         if lost_overdues:
+            self.logger.debug(f'New lost overdues: {lost_overdues}')
             # read emails to contact for location specific lost items
             with open('config.txt', 'r') as config:
                 for line in config:
@@ -703,22 +706,22 @@ class Overdues:
             location_emails = {
                 "college_memorial": [college_memorial_contact,
                             {'subject': f"College/Memorial Library InfoLab - Lost Item Report from 01-01-{year_now} to {now.isoformat(sep=' ', timespec='seconds')}",
-                             'description': ''}],
+                             'description': '', 'new_overdues': False}],
                 "business": [business_contact,
                             {'subject': f"Business Library InfoLab - Lost Item Report from 01-01-{year_now} to {now.isoformat(sep=' ', timespec='seconds')}",
-                             'description': ''}],
+                             'description': '', 'new_overdues': False}],
                 "ebling": [ebling_contact,
                             {'subject': f"Ebling Library InfoLab - Lost Item Report from 01-01-{year_now} to {now.isoformat(sep=' ', timespec='seconds')}",
-                             'description': ''}],
+                             'description': '', 'new_overdues': False}],
                 "social work": [social_work_contact,
                             {'subject': f"Social Work Library InfoLab - Lost Item Report from 01-01-{year_now} to {now.isoformat(sep=' ', timespec='seconds')}",
-                             'description': ''}],
+                             'description': '', 'new_overdues': False}],
                 "steenbock": [steenbock_contact,
                             {'subject': f"Steenbock Library InfoLab - Lost Item Report from 01-01-{year_now} to {now.isoformat(sep=' ', timespec='seconds')}",
-                             'description': ''}],
+                             'description': '', 'new_overdues': False}],
                 "merit": [merit_contact,
                             {'subject': f"MERIT Library InfoLab - Lost Item Report from 01-01-{year_now} to {now.isoformat(sep=' ', timespec='seconds')}",
-                             'description': ''}],
+                             'description': '', 'new_overdues': False}],
             }
 
             # need safety for if folder doesn't exist, and to make it
@@ -761,8 +764,9 @@ class Overdues:
 
                 for lost_ck in lost_overdues:
                     invoice_oid, allocation_oid = lost_ck[0], lost_ck[1]
+                    self.logger.info(f'Processing new lost with invoice_oid: {invoice_oid} & allocation_oid: {allocation_oid}')
 
-                    #stopgap - cleanup
+                    ##### stopgap - cleanup
                     if invoice_oid == -1:
                         continue # should actually delete references -- add later
 
@@ -783,7 +787,7 @@ class Overdues:
                     for item in alloc['payload']['items']:
                         rem = self.connection.delete_resource(item['resource']['oid'])
                         if type(rem) == str:
-                            self.logger.info(alloc['payload']['oid'], rem)
+                            self.logger.info(f'{alloc['payload']['oid']} : {rem}')
 
                         item_text = ', '.join([str(item['resource']['oid']),
                                             item['name'],
@@ -801,8 +805,10 @@ class Overdues:
                         center = ' '.join(alloc['payload']['checkoutCenter']['name'].lower().split()[:-1])
                         if center in ('college', 'memorial'):
                             location_emails['college_memorial'][1]['description'] += item_text
+                            location_emails['college_memorial'][1]['new_overdues'] = True
                         elif center in location_emails.keys():
-                            location_email[center][1]['description'] += item_text
+                            location_emails[center][1]['description'] += item_text
+                            location_emails[center][1]['new_overdues'] = True
 
                     self.db.run("UPDATE invoices SET overdue_lost = True WHERE ck_oid = %(ck_oid)s", ck_oid = allocation_oid)
 
@@ -814,13 +820,13 @@ class Overdues:
 
             # email each contact their relevent lost items
             for center in location_emails:
-                if location_emails[center][1]['description']:
+                if location_emails[center][1]['new_overdues']:
                     for email in location_emails[center][0]:
                         ticket = self.rm_connection.create_ticket(subject=location_emails[center][1]['subject'],
                                                                   contact_email=email)
                         self.rm_connection.email_patron(ticket['helpdesk_ticket']['id'], self.rm_connection.statuses['Resolved'], csv_header + location_emails[center][1]['description'])
 
-            self.logger.info("Lost csv record created at: ", f"../Lost Logs/Lost Items {file_name_time}.csv")
+            self.logger.info("Lost csv record created at: " + f"../Lost Logs/Lost Items {file_name_time}.csv")
         
         # maybe do resources instead of full checkouts?
         allocations = input("Lost Returned allocations (whitespace seperation): ")
@@ -1126,6 +1132,56 @@ class Overdues:
     #             update_query += f"registrar_hold = {True}, "
             
     #         self.db.run("UPDATE overdues SET %(query)s WHERE patron_oid = %(oid)i", query=update_query, oid=patron_oid)
+
+    # check hold counts match across sums of invoices to overdues total, and take sum of invoices if not.
+    def reconcile_database_counts(self):
+        self.logger.debug('Reconcilling overdue table item counts and invoice table item counts.')
+        db_overdues = self.db.all('SELECT patron_oid, count FROM overdues')
+
+        for patron_oid, count in db_overdues:
+            if count == None:
+                continue
+            try:
+                invoices_item_count = sum(self.db.all('SELECT count from invoices WHERE patron_oid = %(p_oid)s', p_oid = patron_oid))
+            except Exception as e:
+                self.logger.debug(f"Encountered {e} for patron_oid = {patron_oid}, count = {count}")
+                continue
+            if invoices_item_count != count:
+                self.logger.debug(f'patron_oid of {patron_oid} overdue count of {count} doesn\'t match invoice item count total of {invoices_item_count}.')
+                self.db.run('UPDATE overdues SET count = %(new_count)s WHERE patron_oid = %(p_oid)s', new_count = invoices_item_count, p_oid = patron_oid)
+
+    # A (potentially temporary) function to check if hold counts in the database are correct, and update them properly if not.
+    def reconcile_database_wco_hold_counts(self):
+
+        db_invoices = self.db.all('SELECT count, invoice_oid, ck_oid, patron_oid FROM invoices WHERE invoice_oid != -1 AND count != 0 AND hold_remove_time IS NOT NULL AND ' \
+                                    "hold_remove_time - hold_length > ('NOW'::TIMESTAMP - '40Days'::INTERVAL)")
+
+        for count, invoice_oid, ck_oid, patron_oid in db_invoices:
+            allocation = self.connection.get_allocation(allocation_oid = ck_oid, properties=['items', 'scheduledEndTime'])['payload']
+
+            item_count = 0
+            for item in allocation['items']:
+                scheduled_end = datetime.strptime(allocation['scheduledEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+                try:
+                    end_time = datetime.strptime(item['realReturnTime'], '%Y-%m-%dT%H:%M:%S.%f%z')
+                except Exception as e:
+                    print(e)
+                    print(count, invoice_oid, ck_oid, patron_oid)
+                    continue
+
+                overdue_length = end_time - scheduled_end
+
+                # if allocation has a previously returned item that was returned not overdue, it's length would be 0, and no hold should be placed for it
+                ## <1 day for normal items is the grace period. Alternatively, if it is a reserve item, 10 min grace period.
+                if overdue_length.days > 0 or ('reserve' in item['rtype']['path'].lower() and (overdue_length.seconds // 600) > 0):
+                    # truncate to days only
+                    item_count += 1
+
+            if item_count != count:
+                diff = count - item_count
+                if diff > 0:
+                    self.db.run('UPDATE invoices SET count = %(new_count)s WHERE invoice_oid = %(i_oid)s', new_count = item_count, i_oid = invoice_oid)
+                    self.db.run('UPDATE overdues SET count = count - %(bad_count)s WHERE patron_oid = %(p_oid)s', bad_count = diff, p_oid = patron_oid)
 
     # check for inconsistancies between db and wco
     def reconcile_database(self):

@@ -310,8 +310,10 @@ class utils:
         
         if length_type_pairs:
             result, new_overdue_count = Repercussions(length_type_pairs, overdue_count).update()
+            new_overdue_count = new_overdue_count - overdue_count  # new_overdue_count should be the amount for the current invoice only,
+                                                                   # not the total amount returned by Repercussions.update
         else:
-            new_overdue_count = overdue_count
+            new_overdue_count = 0
             result = {'Hold': 0, 'Fee': False, 'Registrar Hold': False}
 
         return result, alloc_end_time, allocation['checkoutCenter'], new_overdue_count
