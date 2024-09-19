@@ -105,13 +105,14 @@ class Overdues:
 
         # retrieve database location
         with open('config.ini', 'r') as config:
+            db_location = ''
             for line in config.readlines():
                 if 'db_location' in line.lower():
                     db_location = line.split('=', maxsplit=1)[1].strip()
-                else:
-                    err = FileNotFoundError(f'No database location provided in "config.ini" -- key is "db_location"')
-                    self.logger.exception(err)
-                    raise err
+            if not db_location:
+                err = FileNotFoundError(f'No database location provided in "config.ini" -- key is "db_location"')
+                self.logger.exception(err)
+                raise err
         
         chdir(f"{db_location}/bin")
         response = system(f'pg_ctl status -D "{db_location}/data"')
