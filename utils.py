@@ -6,6 +6,10 @@ import re
 import webbrowser
 import pathlib
 from datetime import datetime, timezone, timedelta
+import logging
+from postgres import Postgres
+
+module_logger = logging.getLogger(__name__)
 
 #####
 # Name: dupeCheckouts
@@ -504,3 +508,29 @@ class Repercussions:
             self.final_consequences['Hold'] = sum(hold_lengths) # items apply holds consecutively
 
         return self.final_consequences, self.overdue_count
+
+class DatabaseOps:
+
+    def __init__(self, database: Postgres, connection: Connection = None):
+        self.logger = logging.getLogger(module_logger.name + ".DatabaseOps")
+        self.db = database
+        self.connection = connection
+
+        if self.connection == None:
+            self.logger.debug('Continuing without WebCheckout connection')
+    
+    def database_wco_check_open_invoices(self, unwaived_only = True):
+        if self.connection == None:
+            return
+            # TODO: raise Exception
+        
+        # retrieve all currently pending invoices
+        if unwaived_only:
+            invoices = self.db.all('SELECT invoice_oid FROM invoices WHERE NOT waived')
+        else:
+            invoices = self.db.all('SELECT invoice_oid FROM invoices')
+        
+        for invoice_oid in invoices:
+            wco_invoice = self.connection.get_invoice(invoice_oid, properties=['invoiceStatus'])['payload']
+            if wco_invoice['invoiceStatus'].lower() == 'waived':
+                self.logger.warning(f"Invoice {wco_invoice['name']} (oid: {invoice_oid}) unwaived in Database, waived in WebCheckout.")
