@@ -483,7 +483,8 @@ class CannedMessages:
         
         amount = 0
         for invoice_line in invoice_lines:
-            charge += invoice_line['amount'] / 100
+            if not invoice_line['struck']:
+                charge += invoice_line['amount'] / 100
 
         returned_date = datetime.strptime(allocation['realEndTime'], '%Y-%m-%dT%H:%M:%S.%f%z').isoformat(sep=' ', timespec='seconds') if allocation['realEndTime'] else None
         
