@@ -54,31 +54,31 @@ class Overdues:
             self._process_returned_overdues(start_time, end_time)
         except Exception as e:
             self.logger.exception(f'Failed with error {e}')
-        self.logger.info("Processing current fines")
-        try:
-            self._process_fines()
-        except Exception as e:
-            self.logger.exception(f'Failed with error {e}')
-        self.logger.info("Processing current holds")
-        try:
-            self._remove_holds()
-        except Exception as e:
-            self.logger.exception(f'Failed with error {e}')
-        self.logger.info("Processing current overdues")
-        try:
-            self._process_current_overdues()
-        except Exception as e:
-            self.logger.exception(f'Failed with error {e}')
-        self.logger.info("Processing expirations")
-        try:
-            self._process_expirations()
-        except Exception as e:
-            self.logger.exception(f'Failed with error {e}')
-        self.logger.info("Processing lost")
-        try:
-            self._process_lost()
-        except Exception as e:
-            self.logger.exception(f'Failed with error {e}')
+        # self.logger.info("Processing current fines")
+        # try:
+        #     self._process_fines()
+        # except Exception as e:
+        #     self.logger.exception(f'Failed with error {e}')
+        # self.logger.info("Processing current holds")
+        # try:
+        #     self._remove_holds()
+        # except Exception as e:
+        #     self.logger.exception(f'Failed with error {e}')
+        # self.logger.info("Processing current overdues")
+        # try:
+        #     self._process_current_overdues()
+        # except Exception as e:
+        #     self.logger.exception(f'Failed with error {e}')
+        # self.logger.info("Processing expirations")
+        # try:
+        #     self._process_expirations()
+        # except Exception as e:
+        #     self.logger.exception(f'Failed with error {e}')
+        # self.logger.info("Processing lost")
+        # try:
+        #     self._process_lost()
+        # except Exception as e:
+        #     self.logger.exception(f'Failed with error {e}')
         self.logger.info("Processing registrar holds")
         try:
             self._process_registrar_holds()
@@ -384,10 +384,11 @@ class Overdues:
             allocations = specific_checkouts
 
         for allocation in allocations:
-            if allocation['oid'] not in excluded_checkouts:
+            if allocation['oid'] not in excluded_checkouts and allocation['oid'] != self.db.one('SELECT ck_oid FROM invoices WHERE ck_oid = %(ck_oid)s', ck_oid = allocation['oid']):
                 self.logger.debug(f'Processing returned overdue allocation_oid: {allocation["oid"]}')
                 # retrieve policy consequences based on allocation items, types, and overdue length (planned incorporation of count here instead of in sql upserts)
                 overdue_count = self.db.one('SELECT count FROM overdues WHERE patron_oid = %(oid)s', oid=allocation['patron']['oid'])
+                overdue_count = overdue_count if overdue_count else 0
                 conseq, end_time, checkout_center, item_count = self.utils.get_overdue_consequence(allocation, overdue_count)
                 # used to decriment fee_count and/or registrar_count in database if one is removed
                 fee_status, registrar_status = 0, 0
