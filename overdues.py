@@ -810,7 +810,7 @@ class Overdues:
                     for item in alloc['payload']['items']:
                         rem = self.connection.delete_resource(item['resource']['oid'])
                         if type(rem) == str:
-                            self.logger.info(f'{alloc['payload']['oid']} : {rem}')
+                            self.logger.info(f"{alloc['payload']['oid']} : {rem}")
 
                         item_text = ', '.join([str(item['resource']['oid']),
                                             item['name'],
