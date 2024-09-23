@@ -54,26 +54,26 @@ class Overdues:
             self._process_returned_overdues(start_time, end_time)
         except Exception as e:
             self.logger.exception(f'Failed with error {e}')
-        # self.logger.info("Processing current fines")
-        # try:
-        #     self._process_fines()
-        # except Exception as e:
-        #     self.logger.exception(f'Failed with error {e}')
-        # self.logger.info("Processing current holds")
-        # try:
-        #     self._remove_holds()
-        # except Exception as e:
-        #     self.logger.exception(f'Failed with error {e}')
-        # self.logger.info("Processing current overdues")
-        # try:
-        #     self._process_current_overdues()
-        # except Exception as e:
-        #     self.logger.exception(f'Failed with error {e}')
-        # self.logger.info("Processing expirations")
-        # try:
-        #     self._process_expirations()
-        # except Exception as e:
-        #     self.logger.exception(f'Failed with error {e}')
+        self.logger.info("Processing current fines")
+        try:
+            self._process_fines()
+        except Exception as e:
+            self.logger.exception(f'Failed with error {e}')
+        self.logger.info("Processing current holds")
+        try:
+            self._remove_holds()
+        except Exception as e:
+            self.logger.exception(f'Failed with error {e}')
+        self.logger.info("Processing current overdues")
+        try:
+            self._process_current_overdues()
+        except Exception as e:
+            self.logger.exception(f'Failed with error {e}')
+        self.logger.info("Processing expirations")
+        try:
+            self._process_expirations()
+        except Exception as e:
+            self.logger.exception(f'Failed with error {e}')
         # self.logger.info("Processing lost")
         # try:
         #     self._process_lost()
