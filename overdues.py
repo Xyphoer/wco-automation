@@ -996,14 +996,15 @@ class Overdues:
                     self.logger.info(f'Excluded Registrar Hold Patron - Removed: {p_oid} -- {person["name"]} - ({person["barcode"]})')
 
             with self.db.get_cursor() as cursor:
-                cursor.run("DELETE FROM invoices WHERE ck_oid = %(ck_oid)s RETURNING hold_status, fee_status, hold_length", ck_oid = ck_oid)
+                cursor.run("DELETE FROM invoices WHERE ck_oid = %(ck_oid)s RETURNING hold_status, fee_status, hold_length, hold_remove_time", ck_oid = ck_oid)
                 prev_status = cursor.fetchone()
                 
             self.db.run("UPDATE overdues SET hold_count = hold_count - %(hold_amount)s, " \
                             "fee_count = fee_count - %(fee_amount)s, " \
                             "registrar_hold_count = registrar_hold_count - %(reg_hold)s, " \
-                            "hold_length = hold_length - CAST(%(hold_len)s AS INTERVAL), "
-                            "invoice_oids = invoice_oids - '{%(i_id)s}'::integer[]"
+                            "hold_length = hold_length - CAST(%(hold_len)s AS INTERVAL), " \
+                            "hold_remove_time = hold_remove_time - CAST(%(hold_len)s AS INTERVAL), " \
+                            "invoice_oids = invoice_oids - '{%(i_id)s}'::integer[] " \
                         "WHERE patron_oid = %(p_id)s",
                             hold_amount = int(prev_status[0]),
                             fee_amount = int(prev_status[1]),
@@ -1011,6 +1012,10 @@ class Overdues:
                             hold_len = prev_status[2],
                             i_id = i_oid,
                             p_id = p_oid) # convert previous hold/fee/registrar status to 1/0 for updating overdues
+            
+            for invoice_oid, hold_remove_time in self.db.all('SELECT invoice_oid, hold_remove_time FROM invoices WHERE patron_oid = %(p_id)s', p_id = p_oid):
+                if hold_remove_time > prev_status[3]:
+                    self.db.run('UPDATE invoices SET hold_remove_time = hold_remove_time - CAST(%(hold_len)s AS INTERVAL) WHERE invoice_oid = %(i_oid)s', i_oid = i_oid)
         
         if temporary:
             self.db.run("DELETE FROM excluded_allocations WHERE allocation_oid = ANY(%(temp_ids)s)", temp_ids = new_allocation_oids)
