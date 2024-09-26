@@ -74,11 +74,11 @@ class Overdues:
             self._process_expirations()
         except Exception as e:
             self.logger.exception(f'Failed with error {e}')
-        # self.logger.info("Processing lost")
-        # try:
-        #     self._process_lost()
-        # except Exception as e:
-        #     self.logger.exception(f'Failed with error {e}')
+        self.logger.info("Processing lost")
+        try:
+            self._process_lost()
+        except Exception as e:
+            self.logger.exception(f'Failed with error {e}')
         self.logger.info("Processing registrar holds")
         try:
             self._process_registrar_holds()
@@ -707,7 +707,7 @@ class Overdues:
         year_now = now.year
         prev_lost = self.db.all(f"SELECT invoice_oid, ck_oid FROM invoices WHERE overdue_lost AND overdue_start_time < CAST('01-01-{year_now}' AS TIMESTAMP)")
 
-        lost_overdues.append(self.db.one("SELECT invoice_oid, ck_oid FROM invoices WHERE invoice_oid = 147394063"))
+
 
         # only make file if new lost overdues
         if lost_overdues:
