@@ -384,7 +384,9 @@ class Overdues:
             allocations = specific_checkouts
 
         for allocation in allocations:
-            if allocation['oid'] not in excluded_checkouts and allocation['oid'] != self.db.one('SELECT ck_oid FROM invoices WHERE ck_oid = %(ck_oid)s', ck_oid = allocation['oid']):
+            # allow a checkout to come multiple times (i.e. have time ranges overlap) but only be processed once -- TODO: possible rework
+            if allocation['oid'] not in excluded_checkouts and allocation['oid'] != self.db.one('SELECT ck_oid FROM invoices WHERE ck_oid = %(ck_oid)s AND hold_remove_time IS NOT NULL', ck_oid = allocation['oid']):
+
                 self.logger.debug(f'Processing returned overdue allocation_oid: {allocation["oid"]}')
                 # retrieve policy consequences based on allocation items, types, and overdue length (planned incorporation of count here instead of in sql upserts)
                 overdue_count = self.db.one('SELECT count FROM overdues WHERE patron_oid = %(oid)s', oid=allocation['patron']['oid'])
