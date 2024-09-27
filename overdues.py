@@ -379,14 +379,13 @@ class Overdues:
         excluded_checkouts.extend(self.db.all('SELECT ck_oid FROM invoices WHERE overdue_lost'))
 
         if not specific_checkouts:
-            allocations = self.connection.get_completed_overdue_allocations(start_search_time, end_search_time)['payload']['result']
-            for i in range(allocations):
-                allocation = allocations[i]
-
+            allocations_base = self.connection.get_completed_overdue_allocations(start_search_time, end_search_time)['payload']['result']
+            allocations = []
+            for allocation in allocations_base:
                 grace_period = datetime.fromisoformat(allocation['scheduledEndTime']) + timedelta(minutes=10) # 10 minute grace period. get_completed_overdue_allocations is not able to process that in the internal request to wco
                 return_time = datetime.fromisoformat(allocation['realEndTime'])
-                if return_time < grace_period:
-                    allocations.pop(i) # if they were overdue by <= 10 mins, don't process them
+                if return_time > grace_period:
+                    allocations.append(allocation) # if they were overdue past the 10 min grace period, process the checkout
         else:
             allocations = specific_checkouts
 
@@ -1021,8 +1020,8 @@ class Overdues:
                             p_id = p_oid) # convert previous hold/fee/registrar status to 1/0 for updating overdues
             
             for invoice_oid, hold_remove_time in self.db.all('SELECT invoice_oid, hold_remove_time FROM invoices WHERE patron_oid = %(p_id)s', p_id = p_oid):
-                if hold_remove_time > prev_status[3]:
-                    self.db.run('UPDATE invoices SET hold_remove_time = hold_remove_time - CAST(%(hold_len)s AS INTERVAL) WHERE invoice_oid = %(i_oid)s', i_oid = i_oid)
+                if hold_remove_time and hold_remove_time > prev_status[3]:
+                    self.db.run('UPDATE invoices SET hold_remove_time = hold_remove_time - CAST(%(hold_len)s AS INTERVAL) WHERE invoice_oid = %(i_oid)s', hold_len = prev_status[2], i_oid = i_oid)
         
         if temporary:
             self.db.run("DELETE FROM excluded_allocations WHERE allocation_oid = ANY(%(temp_ids)s)", temp_ids = new_allocation_oids)
