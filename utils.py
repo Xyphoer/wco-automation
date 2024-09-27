@@ -453,11 +453,11 @@ class Repercussions:
         }
         self.upper_limits = (0, 1, 10, 20)
         # checks which section of "length of overdue" patron is in - Actual hold length comes from self.resource_type_consequence_mapping with a type
-        self.overdue_pairs = [(self._ceil(pair[0]), self._get_bucket(pair[1])) for pair in length_type_pairs]
+        self.overdue_pairs = [(self._ceil(pair[0]), self._get_bucket(pair[1]), pair[0]) for pair in length_type_pairs]
         self.overdue_count = overdue_count
 
-    def _get(self, idx, length):
-        conseq = self.resource_type_consequence_mapping[idx][length]
+    def _get(self, idx, ceil, length):
+        conseq = self.resource_type_consequence_mapping[idx][ceil]
         # handle 'lenght of overdue' holds
         if conseq['Hold'] == -1:
             conseq['Hold'] = length
@@ -485,17 +485,17 @@ class Repercussions:
         hold_lengths = []
         overdue_count_holds = []
 
-        for overdue_length, resource_type in self.overdue_pairs:
+        for overdue_ceil, resource_type, overdue_length in self.overdue_pairs:
             if self.overdue_count != None:
                 # update with current overdue count
                 self.overdue_count += 1
                 if self.overdue_count in (5, 10, 12):
                     overdue_count_holds.append(self.resource_type_consequence_mapping['Overdue Count'][self.overdue_count])
 
-            hold_lengths.append(self._get(resource_type, overdue_length)['Hold'])
+            hold_lengths.append(self._get(resource_type, overdue_ceil, overdue_length)['Hold'])
 
-            self.final_consequences['Fee'] = True if self._get(resource_type, overdue_length)['Fee'] or self.final_consequences['Fee'] else False
-            self.final_consequences['Registrar Hold'] = True if self._get(resource_type, overdue_length)['Registrar Hold'] or self.final_consequences['Registrar Hold'] else False
+            self.final_consequences['Fee'] = True if self._get(resource_type, overdue_ceil, overdue_length)['Fee'] or self.final_consequences['Fee'] else False
+            self.final_consequences['Registrar Hold'] = True if self._get(resource_type, overdue_ceil, overdue_length)['Registrar Hold'] or self.final_consequences['Registrar Hold'] else False
 
         if -2 in overdue_count_holds:
             self.final_consequences['Hold'] = -1
