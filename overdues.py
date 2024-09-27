@@ -380,6 +380,13 @@ class Overdues:
 
         if not specific_checkouts:
             allocations = self.connection.get_completed_overdue_allocations(start_search_time, end_search_time)['payload']['result']
+            for i in range(allocations):
+                allocation = allocations[i]
+
+                grace_period = datetime.fromisoformat(allocation['scheduledEndTime']) + timedelta(minutes=10) # 10 minute grace period. get_completed_overdue_allocations is not able to process that in the internal request to wco
+                return_time = datetime.fromisoformat(allocation['realEndTime'])
+                if return_time < grace_period:
+                    allocations.pop(i) # if they were overdue by <= 10 mins, don't process them
         else:
             allocations = specific_checkouts
 

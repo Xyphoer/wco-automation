@@ -269,12 +269,11 @@ class Connection:
     @check_wco_request
     def get_completed_overdue_allocations(self, start_time: datetime, end_time: datetime):
         earliest_actual_end = start_time.isoformat()
-        latest_scheduled_end = (start_time - timedelta(minutes=10)).isoformat()  # 10 minute grace period
         latest_actual_end = end_time.isoformat()
 
         return self.request_session.post(url = self.host + "/rest/allocation/search",
                              headers = {"Authorization": "Bearer " + self.session_token},
-                             json = {"query": {"and": {"earliestActualEnd": earliest_actual_end, "latestScheduledEnd": latest_scheduled_end, "latestActualEnd": latest_actual_end}},
+                             json = {"query": {"and": {"earliestActualEnd": earliest_actual_end, "returnedLate": True, "latestActualEnd": latest_actual_end}},
                                      "properties": ["oid", "patron", "items", "scheduledEndTime", "realEndTime", "checkoutCenter"]})
     
     # get current overdues
